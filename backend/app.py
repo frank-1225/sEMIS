@@ -5,6 +5,7 @@ from flask_cors import CORS
 import os
 import atexit
 import logging
+import shutil  # 用于文件备份操作
 
 # 配置日志，用于捕获服务器端的异常信息
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,7 +27,7 @@ AUTH_KEY = 'temp_auth_token_for_demo'
 # 全局数据库连接对象
 db_conn = None
 
-# 列名映射（保持不变，注意：新字段“查询用车组号”不需要在这里，因为它仅用于后台查询）
+# 列名映射 (已包含 "查询用车组号")
 COLUMN_MAP = [
     "总序号", "车组号", "车内布局", "运用状态", "运用属性", "配属局", "配属段", "配属所",
     "车型", "批次", "制造厂", "制造日期", "最高运营速度（km/h）", "设计寿命（年）", "列车总长（m）",
@@ -41,9 +42,10 @@ COLUMN_MAP = [
     "10车车种", "10车定员", "11车车种", "11车定员", "12车车种", "12车定员",
     "13车车种", "13车定员", "14车车种", "14车定员", "15车车种", "15车定员",
     "16车车种", "16车定员", "17车车种", "17车定员",
-    "市域车所属线路", "特殊涂装", "备注", "座椅类型"
+    "市域车所属线路", "特殊涂装", "备注", "座椅类型", "查询用车组号"
 ]
-# 筛选器键到 SQL 列的映射（保持不变）
+
+# 筛选器键到 SQL 列的映射
 FILTER_COL_MAP = {
     'attr': '运用属性', 'bureau': '配属局', 'depot': '配属段', 'location': '配属所',
     'model': '车型', 'factory': '制造厂', 'car_count': '编组（辆）'
@@ -53,27 +55,58 @@ def get_db_connection():
   """返回一个新的 SQLite 连接。"""
   return sqlite3.connect(DB_FILE, check_same_thread=False)
 
+# ======================================================
+# 数据库核心逻辑
+# ======================================================
+
+def reload_database_from_csv():
+    """强制从 CSV 文件重新加载数据到 SQLite"""
+    logging.info(f"正在重新加载数据: {CSV_FILE} -> {DB_FILE}...")
+    try:
+        # 读取 CSV
+        df = pd.read_csv(CSV_FILE, encoding='utf-8', skipinitialspace=True, engine='python')
+        df.columns = df.columns.str.strip()
+        
+        # 使用独立的连接进行写入，避免干扰主连接
+        # if_exists='replace' 会自动重建表结构
+        with sqlite3.connect(DB_FILE) as temp_conn:
+            df.to_sql(TABLE_NAME, temp_conn, if_exists='replace', index=False)
+            temp_conn.commit()
+            
+        logging.info(f"数据库重载成功，当前行数: {len(df)}")
+        return True, len(df)
+    except Exception as e:
+        logging.error(f"数据库重载失败: {e}")
+        return False, str(e)
+
 def init_sqlite_db():
-  """读取 CSV 文件，创建并填充 SQLite 数据库。"""
-  global db_conn
-  if os.path.exists(DB_FILE):
-    logging.info(f"数据库文件 {DB_FILE} 已存在，跳过初始化。")
-    db_conn = get_db_connection()
-    return
-  logging.info(f"正在从 {CSV_FILE} 初始化数据库...")
-  try:
-    # 假设 CSV 中已包含 "查询用车组号" 字段
-    df = pd.read_csv(CSV_FILE, encoding='utf-8', skipinitialspace=True, engine='python')
-    df.columns = df.columns.str.strip()
-    with get_db_connection() as conn:
-      df.to_sql(TABLE_NAME, conn, if_exists='replace', index=False)
-      conn.commit()
-    logging.info(f"成功创建表 '{TABLE_NAME}'，行数: {len(df)}")
-    db_conn = get_db_connection()
-  except FileNotFoundError:
-    logging.error(f"错误: 数据文件 {CSV_FILE} 未找到! 数据库无法初始化。")
-  except Exception as e:
-    logging.error(f"数据库初始化错误: {e}")
+    """启动时初始化：仅当数据库不存在时才加载，提高启动速度"""
+    global db_conn
+    if not os.path.exists(DB_FILE):
+        logging.info("数据库不存在，执行初始化...")
+        reload_database_from_csv()
+    else:
+        logging.info(f"数据库 {DB_FILE} 已存在，跳过初始化。")
+    
+    # 建立全局连接（如果尚未建立或已关闭）
+    try:
+        if db_conn is None:
+            db_conn = get_db_connection()
+    except Exception:
+        db_conn = get_db_connection()
+
+def sync_db_to_csv():
+    """辅助函数：将当前 SQLite 数据库状态保存回 CSV 文件 (持久化修改)"""
+    try:
+        # 读取完整表数据
+        df = pd.read_sql_query(f"SELECT * FROM \"{TABLE_NAME}\"", db_conn)
+        # 写入 CSV
+        df.to_csv(CSV_FILE, index=False, encoding='utf-8')
+        logging.info(f"已同步数据库更改到 {CSV_FILE}")
+        return True
+    except Exception as e:
+        logging.error(f"同步 CSV 失败: {e}")
+        return False
 
 @atexit.register
 def close_db_connection():
@@ -85,6 +118,10 @@ with app.app_context():
   init_sqlite_db()
 
 
+# ======================================================
+# 路由接口
+# ======================================================
+
 @app.route('/api/login', methods=['POST'])
 def login():
   """用户登录验证 (模拟)"""
@@ -94,6 +131,44 @@ def login():
     return jsonify({'message': 'Login successful', 'auth_key': AUTH_KEY}), 200
   else:
     return jsonify({'message': 'Invalid credentials'}), 401
+
+
+@app.route('/api/upload_data', methods=['POST'])
+def upload_data():
+    """上传新的 CSV 文件并刷新数据库"""
+    # 1. 验证权限
+    auth_key = request.headers.get('X-Auth-Key')
+    if auth_key != AUTH_KEY:
+        return jsonify({'message': 'Authorization required'}), 401
+
+    # 2. 验证文件
+    if 'file' not in request.files:
+        return jsonify({'message': '没有上传文件'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'message': '未选择文件'}), 400
+
+    if file:
+        try:
+            # 3. 保存文件 (覆盖原有 traindata.csv)
+            # 建议先备份旧文件
+            if os.path.exists(CSV_FILE):
+                shutil.copy(CSV_FILE, CSV_FILE + '.bak')
+            
+            file.save(CSV_FILE)
+            
+            # 4. 重新加载数据库
+            success, info = reload_database_from_csv()
+            
+            if success:
+                return jsonify({'message': f'上传成功！数据库已更新，共 {info} 条记录。'}), 200
+            else:
+                return jsonify({'message': f'文件保存成功但数据库更新失败: {info}'}), 500
+                
+        except Exception as e:
+            logging.error(f"Upload failed: {e}")
+            return jsonify({'message': f'服务器内部错误: {str(e)}'}), 500
 
 
 @app.route('/api/traindata', methods=['POST'])
@@ -109,7 +184,6 @@ def get_filter_config():
       distinct_df = pd.read_sql_query(f"SELECT DISTINCT \"{col}\" FROM \"{TABLE_NAME}\" WHERE \"{col}\" IS NOT NULL", db_conn)
       values = distinct_df[col].tolist()
       if col == '编组（辆）':
-        # 确保编组（辆）值是字符串，与前端 Select2 兼容
         filters['car_counts'] = [str(x) for x in values]
       elif col == '配属局':
         filters['bureaus'] = values
@@ -131,14 +205,11 @@ def get_filter_config():
 
 
 def build_where_clause(custom_filters, search_value):
-  """
-  根据自定义筛选器和 DataTables 搜索值构建 SQL WHERE 子句和参数列表。
-  DataTables 的全局搜索 (search_value) 和自定义 'train' 搜索均针对新字段 "查询用车组号"。
-  """
+  """根据自定义筛选器和 DataTables 搜索值构建 SQL WHERE 子句和参数列表。"""
   where_clauses = []
   params = []
  
-  # 1. 应用多选筛选器 (保持不变)
+  # 1. 应用多选筛选器
   for key, col in FILTER_COL_MAP.items():
     values = custom_filters.get(key)
     clean_values = [v for v in values if v is not None and str(v).strip() != ''] if isinstance(values, list) else []
@@ -148,25 +219,18 @@ def build_where_clause(custom_filters, search_value):
       where_clauses.append(f"\"{col}\" IN ({placeholders})")
       params.extend(clean_values)
    
-  # 2. 应用自定义 'train' 筛选 (**使用新字段**)
+  # 2. 应用自定义 'train' 筛选
   train_search = custom_filters.get('train')
   if train_search and str(train_search).strip() != '':
-    # 用户输入去连字符，与新字段匹配
     normalized_train_search = train_search.replace('-', '').strip()
     train_search_pattern = f'%{normalized_train_search}%'
-    
-    # 匹配新字段 "查询用车组号"
     where_clauses.append(f"(\"查询用车组号\" LIKE ?)")
     params.append(train_search_pattern)
 
-
-  # 3. 应用 DataTables 全局搜索 (**仅针对新字段**)
+  # 3. 应用 DataTables 全局搜索
   if search_value and str(search_value).strip() != '':
-    # 标准化搜索值：仅移除所有连字符（-）
     normalized_search_value = search_value.replace('-', '').strip()
     search_pattern = f'%{normalized_search_value}%'
-    
-    # 匹配新字段 "查询用车组号"
     where_clauses.append(f"(\"查询用车组号\" LIKE ?)")
     params.append(search_pattern)
             
@@ -183,64 +247,55 @@ def serverside_traindata():
     return jsonify({'message': 'Authorization required or database not ready'}), 401
 
   try:
-    # 1. 强化请求体解析
     data = request.get_json()
     if data is None:
-        logging.error("request.get_json() returned None. Check Content-Type header on the client side.")
+        logging.error("request.get_json() returned None.")
         return jsonify({'message': '请求数据无效，请检查Content-Type或JSON格式。'}), 400 
         
     draw = int(data.get('draw', 0))
     start = int(data.get('start', 0))
     length = int(data.get('length', 25))
-
-    # DataTables 全局搜索值
     search_value = data.get('search', {}).get('value', '')
     
-    # 修复 IndexError
     order_list = data.get('order', [])
     order_data = order_list[0] if order_list else {}
-    
     order_column_index = order_data.get('column')
     order_dir = order_data.get('dir', 'asc')
 
     custom_filters = data.get('custom_filters', {})
-   
-    # 2. 构建 WHERE 子句和参数
     where_sql, params = build_where_clause(custom_filters, search_value)
-   
-    # DEBUG: 打印正在执行的筛选条件，这是诊断问题的关键
-    logging.info(f"Filters - Custom: {custom_filters}, Global Search: '{search_value}'")
-    logging.info(f"SQL Components - WHERE: '{where_sql}', Params: {params}")
     
-    # 3. 统计总数
+    logging.info(f"Filters - Custom: {custom_filters}, Global Search: '{search_value}'")
+    
     cursor = db_conn.cursor()
     cursor.execute(f"SELECT COUNT(*) FROM \"{TABLE_NAME}\"")
     records_total = cursor.fetchone()[0]
 
-    # 4. 统计筛选后的总数
     count_query = f"SELECT COUNT(*) FROM \"{TABLE_NAME}\"{where_sql}"
     cursor.execute(count_query, params)
     records_filtered = cursor.fetchone()[0]
     
-    # 5. 确定排序
+    # --- 排序逻辑修正：强制按总序号的数字值排序 ---
     order_sql = ""
     if order_column_index is not None and order_column_index != '' and int(order_column_index) < len(COLUMN_MAP):
       order_col_name = COLUMN_MAP[int(order_column_index)]
-      order_sql = f" ORDER BY \"{order_col_name}\" {order_dir}"
+      
+      # 如果排序列是 '总序号'，强制转为整数
+      if order_col_name == '总序号':
+          order_sql = f" ORDER BY CAST(\"{order_col_name}\" AS INTEGER) {order_dir}"
+      else:
+          order_sql = f" ORDER BY \"{order_col_name}\" {order_dir}"
     else:
-        order_sql = f" ORDER BY \"总序号\" ASC"
+        # 默认排序也是数字顺序
+        order_sql = f" ORDER BY CAST(\"总序号\" AS INTEGER) ASC"
 
-    # 6. 确定分页
     limit_sql = f" LIMIT {length} OFFSET {start}"
-   
-    # 7. 获取数据切片
     select_columns = ', '.join([f'"{col}"' for col in COLUMN_MAP])
     data_query = f"SELECT {select_columns} FROM \"{TABLE_NAME}\"{where_sql}{order_sql}{limit_sql}"
    
     df_data_slice = pd.read_sql_query(data_query, db_conn, params=params)
     data_list = df_data_slice.to_dict('records')
 
-    # 8. 返回 DataTables JSON 响应
     return jsonify({
       "draw": draw,
       "recordsTotal": records_total,
@@ -262,7 +317,6 @@ def export_data():
   try:
     data = request.get_json()
     custom_filters = data.get('custom_filters', {})
-    # 忽略 DataTables 的 search_value, start, length
     where_sql, params = build_where_clause(custom_filters, search_value="") 
     select_columns = ', '.join([f'"{col}"' for col in COLUMN_MAP])
     data_query = f"SELECT {select_columns} FROM \"{TABLE_NAME}\"{where_sql}"
@@ -273,6 +327,106 @@ def export_data():
     logging.error(f"API 导出数据错误: {e}")
     return jsonify({'message': '服务器遇到数据库错误。'}), 500
 
+# ======================================================
+# 后台数据管理 API (增删改)
+# ======================================================
+
+@app.route('/api/manage/update', methods=['POST'])
+def update_row():
+    """更新单行数据"""
+    auth_key = request.headers.get('X-Auth-Key')
+    if auth_key != AUTH_KEY: return jsonify({'message': 'Auth failed'}), 401
+
+    data = request.get_json()
+    row_id = data.get('id') # 总序号
+    updates = data.get('data') # 字典
+
+    if not row_id or not updates:
+        return jsonify({'message': '缺少参数'}), 400
+
+    try:
+        # 构建 UPDATE 语句
+        set_clause = []
+        params = []
+        for col, val in updates.items():
+            if col in COLUMN_MAP and col != "总序号": # 不允许修改 ID
+                set_clause.append(f"\"{col}\" = ?")
+                params.append(val)
+        
+        if not set_clause:
+            return jsonify({'message': '没有有效字段需要更新'}), 400
+
+        params.append(row_id)
+        sql = f"UPDATE \"{TABLE_NAME}\" SET {', '.join(set_clause)} WHERE \"总序号\" = ?"
+        
+        cursor = db_conn.cursor()
+        cursor.execute(sql, params)
+        db_conn.commit()
+        
+        # 同步回 CSV
+        sync_db_to_csv()
+        
+        return jsonify({'message': '更新成功'}), 200
+    except Exception as e:
+        logging.error(f"Update error: {e}")
+        return jsonify({'message': str(e)}), 500
+
+@app.route('/api/manage/add', methods=['POST'])
+def add_row():
+    """新增数据"""
+    auth_key = request.headers.get('X-Auth-Key')
+    if auth_key != AUTH_KEY: return jsonify({'message': 'Auth failed'}), 401
+    
+    data = request.get_json()
+    row_data = data.get('data')
+    
+    try:
+        # 自动计算新的总序号 (数字类型)
+        cursor = db_conn.cursor()
+        cursor.execute(f"SELECT MAX(CAST(\"总序号\" AS INTEGER)) FROM \"{TABLE_NAME}\"")
+        max_id_row = cursor.fetchone()
+        max_id = max_id_row[0] if max_id_row and max_id_row[0] is not None else 0
+        new_id = int(max_id) + 1
+        
+        cols = ["总序号"]
+        vals = [new_id]
+        placeholders = ["?"]
+        
+        for col, val in row_data.items():
+            if col in COLUMN_MAP:
+                cols.append(f"\"{col}\"")
+                vals.append(val)
+                placeholders.append("?")
+        
+        sql = f"INSERT INTO \"{TABLE_NAME}\" ({', '.join(cols)}) VALUES ({', '.join(placeholders)})"
+        cursor.execute(sql, vals)
+        db_conn.commit()
+        
+        sync_db_to_csv()
+        return jsonify({'message': '新增成功', 'new_id': new_id}), 200
+    except Exception as e:
+        logging.error(f"Add error: {e}")
+        return jsonify({'message': str(e)}), 500
+
+@app.route('/api/manage/delete', methods=['POST'])
+def delete_row():
+    """删除数据"""
+    auth_key = request.headers.get('X-Auth-Key')
+    if auth_key != AUTH_KEY: return jsonify({'message': 'Auth failed'}), 401
+    
+    data = request.get_json()
+    row_id = data.get('id')
+    
+    try:
+        cursor = db_conn.cursor()
+        cursor.execute(f"DELETE FROM \"{TABLE_NAME}\" WHERE \"总序号\" = ?", (row_id,))
+        db_conn.commit()
+        
+        sync_db_to_csv()
+        return jsonify({'message': '删除成功'}), 200
+    except Exception as e:
+        logging.error(f"Delete error: {e}")
+        return jsonify({'message': str(e)}), 500
 
 if __name__ == '__main__':
   app.run(debug=True, host='0.0.0.0', port=5000)
