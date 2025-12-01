@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>动车组信息查询系统</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Inter Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  
+  <!-- JQuery -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <!-- DataTables Core -->
+  <link href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css" rel="stylesheet">
+  <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+  <!-- DataTables FixedColumns -->
+  <link href="https://cdn.datatables.net/fixedcolumns/4.3.0/css/fixedColumns.dataTables.min.css" rel="stylesheet" />
+  <script src="https://cdn.datatables.net/fixedcolumns/4.3.0/js/dataTables.fixedColumns.min.js"></script>
+  
+  <!-- Select2 -->
+  <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+  <!-- SheetJS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+    
+    /* --- 彻底重构的表格样式逻辑 --- */
+
+    /* 1. 容器样式 */
+    .dataTables_wrapper {
+        background-color: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+
+    /* 2. 表格核心样式 - 强制内容撑开 */
+    table.dataTable {
+        margin: 0 !important; /* 移除默认边距 */
+        border-collapse: collapse !important;
+        width: max-content !important; /* 关键：宽度由内容决定，不允许压缩 */
+        min-width: 100%;
+    }
+
+    /* 3. 单元格样式 - 统一表头和表体 */
+    table.dataTable thead th,
+    table.dataTable tbody td {
+        white-space: nowrap !important; /* 禁止换行 */
+        padding: 12px 16px !important;  /* 统一内边距 */
+        box-sizing: border-box !important; /* 统一盒模型 */
+        vertical-align: middle;
+        border-bottom: 1px solid #e5e7eb;
+    }
+
+    /* 4. 表头样式优化 */
+    table.dataTable thead th {
+        background-color: #f9fafb;
+        font-weight: 600;
+        color: #374151;
+        border-bottom: 2px solid #e5e7eb !important; /* 加粗表头下边框 */
+    }
+
+    /* 5. 固定列样式修正 */
+    .DTFC_LeftBodyLiner {
+        overflow-x: hidden; /* 隐藏固定列区域的横向滚动条 */
+    }
+    
+    /* 链接样式 */
+    a.train-link {
+        color: #2563eb;
+        font-weight: 600;
+        text-decoration: none;
+        transition: color 0.2s;
+    }
+    a.train-link:hover {
+        color: #1e40af;
+        text-decoration: underline;
+    }
+
+    /* Select2 & Modal Styles (保持不变) */
+    .select2-container .select2-selection--multiple {
+      min-height: 40px; border: 1px solid #d1d5db; border-radius: 0.375rem; padding: 0.25rem 0.5rem;
+    }
+    .select2-container .select2-selection--multiple .select2-selection__rendered { padding-top: 5px; }
+    .select2-container--default .select2-selection--multiple .select2-selection__choice {
+      background-color: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; border-radius: 0.375rem; padding: 2px 8px;
+    }
+    .dataTables_filter label input[type="search"] {
+      border: 1px solid #d1d5db; padding: 0.5rem; border-radius: 0.5rem; margin-left: 0.5rem;
+    }
+    .modal {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0, 0, 0, 0.5); display: none;
+        justify-content: center; align-items: center; z-index: 1000;
+    }
+    .modal-content { max-width: 400px; width: 90%; }
+  </style>
+</head>
+
+<body class="p-4 md:p-8">
+
+  <div id="loginModal" class="modal">
+    <div class="modal-content bg-white p-6 rounded-xl shadow-2xl">
+      <h2 class="text-2xl font-bold mb-4 text-center text-indigo-600">系统登录</h2>
+      <form id="loginForm">
+        <div class="mb-4">
+          <label for="password" class="block text-gray-700 font-medium mb-1">密码:</label>
+          <input type="password" id="password" required placeholder="请输入 API 密码"
+            class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
+        </div>
+        <button type="submit" id="loginBtn"
+          class="w-full bg-indigo-600 text-white p-2 rounded-lg font-semibold hover:bg-indigo-700 transition duration-150">
+          登录
+        </button>
+        <p id="loginMessage" class="text-red-500 text-sm mt-3 text-center"></p>
+      </form>
+    </div>
+  </div>
+
+  <div id="mainContent" class="hidden">
+    <h1 class="text-3xl font-extrabold text-gray-900 mb-6 border-b pb-2">动车组信息查询系统</h1>
+
+    <!-- 筛选器区域 -->
+    <div id="filters" class="bg-white p-6 rounded-xl shadow-lg mb-6">
+      <h3 class="text-xl font-semibold mb-4 text-indigo-600">数据筛选</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div><label class="block text-sm font-medium text-gray-700">运用属性</label><select id="filterAttr" multiple="multiple" class="w-full select2-hidden-accessible"></select></div>
+        <div><label class="block text-sm font-medium text-gray-700">配属局</label><select id="filterBureau" multiple="multiple" class="w-full select2-hidden-accessible"></select></div>
+        <div><label class="block text-sm font-medium text-gray-700">配属段</label><select id="filterDepot" multiple="multiple" class="w-full select2-hidden-accessible" disabled></select></div>
+        <div><label class="block text-sm font-medium text-gray-700">配属所</label><select id="filterLocation" multiple="multiple" class="w-full select2-hidden-accessible" disabled></select></div>
+        <div><label class="block text-sm font-medium text-gray-700">车型</label><select id="filterModel" multiple="multiple" class="w-full select2-hidden-accessible"></select></div>
+        <div><label class="block text-sm font-medium text-gray-700">制造厂</label><select id="filterFactory" multiple="multiple" class="w-full select2-hidden-accessible"></select></div>
+        <div><label class="block text-sm font-medium text-gray-700">编组（辆）</label><select id="filterCarCount" multiple="multiple" class="w-full select2-hidden-accessible"></select></div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">车组号搜索</label>
+          <input type="text" id="filterTrain" placeholder="输入车组号关键字" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-4 mt-6 justify-start">
+        <button id="applyFiltersBtn" class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 shadow-md">应用筛选</button>
+        <button id="resetFiltersBtn" class="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 shadow-md">重置筛选</button>
+        <button id="toggleGroupColumns" class="px-4 py-2 bg-yellow-500 text-white font-semibold rounded-lg hover:bg-yellow-600 shadow-md">显示 编组信息</button>
+        <button id="toggleSeatColumns" class="px-4 py-2 bg-purple-500 text-white font-semibold rounded-lg hover:bg-purple-600 shadow-md">显示 定员信息</button>
+        <button id="exportBtn" class="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 shadow-md">导出 Excel</button>
+      </div>
+    </div>
+
+    <!-- 表格容器：注意这里的 overflow-hidden 是为了让 DataTables 接管滚动 -->
+    <div id="dataTableContainer" class="bg-white rounded-lg shadow overflow-hidden" style="display:none;">
+      <table id="trainDataTable" class="display" style="width:100%"></table>
+    </div>
+  </div>
+
+<script>
+  const API_BASE_URL = 'https://frank1225.dynv6.net:5125'; 
+  let AUTH_KEY = localStorage.getItem('auth_key');
+  let trainDataTable;
+  let mapData = []; 
+  
+  // 完整列顺序定义
+  const desiredColumnOrder = [
+    "总序号", "车组号", "车内布局", "运用状态", "运用属性", "配属局", "配属段", "配属所",
+    "车型", "批次", "制造厂", "制造日期", "最高运营速度（km/h）", "设计寿命（年）", "列车总长（m）",
+    "车体最大宽度（mm）", "车体最大高度（mm）", "轮周牵引总功率（kW）", "停放制动能力", "编组方式",
+    "双弓间距（m）", "受电弓位置（车厢）", "编组（辆）", "EMIS定员", "席位总数", "客票定员",
+    "商务座-包间式", "商务座-鱼骨式", "商务座-标准型", "特等座", "优选一等座", "一等座", "二等座",
+    "高级动卧", "动卧", "多功能座", "餐座", "无座", "非对号定员-餐座", "非对号定员-边座",
+    "非对号定员-其他", "非对号定员-无座",
+    "01车车种", "01车定员", "02车车种", "02车定员", "03车车种", "03车定员",
+    "04车车种", "04车定员", "05车车种", "05车定员", "06车车种", "06车定员",
+    "07车车种", "07车定员", "08车车种", "08车定员", "09车车种", "09车定员",
+    "10车车种", "10车定员", "11车车种", "11车定员", "12车车种", "12车定员",
+    "13车车种", "13车定员", "14车车种", "14车定员", "15车车种", "15车定员",
+    "16车车种", "16车定员", "17车车种", "17车定员",
+    "市域车所属线路", "特殊涂装", "备注", "座椅类型"
+  ];
+  
+  const groupColumnIndices = []; 
+  const seatColumnIndices = []; 
+
+  // 构建 DataTables 列定义
+  const dataTableColumns = desiredColumnOrder.map((title, index) => {
+    if (title.startsWith('0') && title.includes('车')) groupColumnIndices.push(index);
+    if (title.startsWith('1') && title.includes('车')) groupColumnIndices.push(index);
+    if (['商务座', '特等座', '优选一等座', '一等座', '二等座', '动卧', '多功能座', '餐座', '无座', '非对号定员'].some(key => title.includes(key))) {
+      seatColumnIndices.push(index);
+    }
+
+    return {
+      data: title,
+      title: title,
+      visible: !(groupColumnIndices.includes(index) || seatColumnIndices.includes(index)),
+      // 移除特定的 className，让 CSS 全局处理字体颜色
+      className: 'dt-body-left' 
+    };
+  });
+  
+  let groupColumnsVisible = false;
+  let seatColumnsVisible = false;
+
+  // --- 认证 ---
+  async function authFetch(url, options = {}) {
+    if (!AUTH_KEY) { showLoginModal(); return null; }
+    const headers = { 'Content-Type': 'application/json', 'X-Auth-Key': AUTH_KEY, ...options.headers };
+    try {
+      const response = await fetch(`${API_BASE_URL}${url}`, { ...options, headers: headers });
+      if (response.status === 401) { showLoginModal(); return null; }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Server error');
+      return data;
+    } catch (error) {
+      console.error('API Error:', error);
+      alert('请求失败: ' + error.message);
+      return null;
+    }
+  }
+
+  function showLoginModal() {
+    $('#mainContent').addClass('hidden');
+    $('#loginModal').css('display', 'flex');
+    AUTH_KEY = null; localStorage.removeItem('auth_key');
+  }
+
+  async function handleLogin(event) {
+    event.preventDefault();
+    const password = $('#password').val();
+    $('#loginBtn').prop('disabled', true).text('登录中...');
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: password })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        AUTH_KEY = data.auth_key; localStorage.setItem('auth_key', AUTH_KEY);
+        $('#loginModal').hide(); $('#mainContent').removeClass('hidden');
+        await loadFilterConfig(); initDataTable(); 
+      } else { $('#loginMessage').text(data.message); }
+    } catch (e) { $('#loginMessage').text('无法连接到服务器'); }
+    finally { $('#loginBtn').prop('disabled', false).text('登录'); }
+  }
+
+  // --- 筛选器 ---
+  async function loadFilterConfig() {
+    const data = await authFetch('/api/traindata', { method: 'POST' });
+    if (!data) return;
+    mapData = data.map_data || [];
+    const filters = data.filters || {};
+    
+    $('.w-full.select2-hidden-accessible').select2({ placeholder: "请选择...", allowClear: true, width: '100%' });
+    
+    const populate = (sel, vals) => {
+      $(sel).empty();
+      if(vals) vals.forEach(v => $(sel).append(new Option(v, v, false, false)));
+      $(sel).trigger('change');
+    };
+
+    populate('#filterAttr', filters.attrs);
+    populate('#filterModel', filters.models);
+    populate('#filterFactory', filters.factories);
+    populate('#filterCarCount', filters.car_counts);
+    populate('#filterBureau', filters.bureaus);
+
+    $('#filterBureau').on('change', updateDepotFilter);
+    $('#filterDepot').on('change', updateLocationFilter);
+  }
+
+  function updateDepotFilter() {
+    const bureaus = $('#filterBureau').val() || [];
+    const $depot = $('#filterDepot').prop('disabled', true).empty();
+    const $loc = $('#filterLocation').prop('disabled', true).empty();
+    if(!bureaus.length) return;
+
+    const depots = [...new Set(mapData.filter(i => bureaus.includes(i['配属局'])).map(i => i['配属段']).filter(d=>d))].sort();
+    depots.forEach(d => $depot.append(new Option(d, d, false, false)));
+    $depot.prop('disabled', false).trigger('change');
+  }
+
+  function updateLocationFilter() {
+    const bureaus = $('#filterBureau').val();
+    const depots = $('#filterDepot').val() || [];
+    const $loc = $('#filterLocation').prop('disabled', true).empty();
+    if(!depots.length) return;
+
+    const locs = [...new Set(mapData.filter(i => bureaus.includes(i['配属局']) && depots.includes(i['配属段'])).map(i => i['配属所']).filter(l=>l))].sort();
+    locs.forEach(l => $loc.append(new Option(l, l, false, false)));
+    $loc.prop('disabled', false).trigger('change');
+  }
+
+  function collectFilters() {
+    return {
+      attr: $('#filterAttr').val(), bureau: $('#filterBureau').val(), depot: $('#filterDepot').val(),
+      location: $('#filterLocation').val(), model: $('#filterModel').val(), factory: $('#filterFactory').val(),
+      car_count: $('#filterCarCount').val(), train: $('#filterTrain').val()
+    };
+  }
+
+  // --- DataTables 核心 ---
+  function initDataTable() {
+    if ($.fn.DataTable.isDataTable('#trainDataTable')) $('#trainDataTable').DataTable().destroy();
+
+    trainDataTable = $('#trainDataTable').DataTable({
+      processing: true,
+      serverSide: true,
+      autoWidth: false, // 关闭自动计算，依赖 CSS 的 max-content
+      scrollX: true,
+      scrollY: '60vh',
+      scrollCollapse: true,
+      fixedColumns: { leftColumns: 2 },
+      ajax: {
+        url: `${API_BASE_URL}/api/serverside/traindata`,
+        type: 'POST',
+        contentType: 'application/json',
+        data: d => JSON.stringify({ ...d, custom_filters: collectFilters() }),
+        dataFilter: data => {
+            const json = JSON.parse(data);
+            if(json.message?.includes('Authorization')) { showLoginModal(); return JSON.stringify({data:[], recordsTotal:0, recordsFiltered:0}); }
+            return data;
+        },
+        headers: { 'X-Auth-Key': AUTH_KEY }
+      },
+      columns: dataTableColumns,
+      columnDefs: [
+        {
+            targets: 1, // 车组号
+            render: (data) => data ? `<a href="https://rail.re/#${encodeURIComponent(data)}" target="_blank" class="train-link">${data}</a>` : ""
+        },
+        {
+            targets: 2, // 车内布局
+            render: (data) => data ? `<a href="${data}" target="_blank" class="text-indigo-600 hover:underline">点击查看</a>` : ""
+        }
+      ],
+      // 核心回调：确保表格显示后再调整
+      initComplete: function() {
+        $('#dataTableContainer').show();
+        this.api().columns.adjust(); 
+      },
+      // 每次数据重绘后（包括翻页），重新校准列宽
+      drawCallback: function() {
+        const api = this.api();
+        // 延迟执行，确保 DOM 已经渲染出最宽的数据
+        setTimeout(() => {
+            api.columns.adjust();
+        }, 200);
+      },
+      language: {
+        processing: "数据加载中...", search: "搜索：", lengthMenu: "每页显示 _MENU_ 条",
+        info: "显示第 _START_ 至 _END_ 项结果，共 _TOTAL_ 项", infoEmpty: "无数据",
+        paginate: { first: "首页", last: "末页", next: "下页", previous: "上页" }
+      }
+    });
+  }
+
+  // --- 按钮绑定 ---
+  $('#applyFiltersBtn').click(() => trainDataTable?.ajax.reload());
+  $('#resetFiltersBtn').click(() => {
+    $('.select2-hidden-accessible').val(null).trigger('change');
+    $('#filterTrain').val('');
+    trainDataTable?.ajax.reload();
+  });
+  
+  $('#toggleGroupColumns').click(function() {
+    groupColumnsVisible = !groupColumnsVisible;
+    groupColumnIndices.forEach(i => trainDataTable.column(i).visible(groupColumnsVisible));
+    trainDataTable.columns.adjust();
+    $(this).text(groupColumnsVisible ? '隐藏 编组信息' : '显示 编组信息');
+  });
+
+  $('#toggleSeatColumns').click(function() {
+    seatColumnsVisible = !seatColumnsVisible;
+    seatColumnIndices.forEach(i => trainDataTable.column(i).visible(seatColumnsVisible));
+    trainDataTable.columns.adjust();
+    $(this).text(seatColumnsVisible ? '隐藏 定员信息' : '显示 定员信息');
+  });
+
+  $('#exportBtn').click(async function() {
+    const $btn = $(this).prop('disabled', true).text('导出中...');
+    try {
+      const res = await authFetch('/api/exportdata', { method: 'POST', body: JSON.stringify({ custom_filters: collectFilters() }) });
+      if(!res || !res.data.length) { alert('无数据导出'); return; }
+      
+      const ws = XLSX.utils.json_to_sheet(res.data, { header: desiredColumnOrder });
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Data");
+      XLSX.writeFile(wb, `动车组信息导出_${new Date().toISOString().split('T')[0]}.xlsx`);
+    } catch(e) { console.error(e); alert('导出失败'); }
+    finally { $btn.prop('disabled', false).text('导出 Excel'); }
+  });
+
+  $(document).ready(() => {
+    $('#loginForm').submit(handleLogin);
+    if(AUTH_KEY) { $('#mainContent').removeClass('hidden'); loadFilterConfig().then(initDataTable).catch(showLoginModal); }
+    else showLoginModal();
+  });
+</script>
+</body>
+</html>

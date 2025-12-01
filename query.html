@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>列车运行信息综合查询系统</title>
+    <style>
+        /* --- 基础样式 --- */
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            padding: 20px; 
+            background-color: #f4f7f6;
+        }
+        h1 {
+            color: #1a73e8;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 10px;
+        }
+        h2 {
+            margin-top: 30px;
+            color: #333;
+        }
+        
+        /* --- 登录模态框样式 --- */
+        #loginModal {
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .login-content {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            width: 300px;
+            text-align: center;
+        }
+        .login-content input {
+            width: 90%;
+            padding: 10px;
+            margin: 15px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .login-btn {
+            width: 100%;
+            padding: 10px;
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .login-btn:hover { background-color: #1558b3; }
+        .login-error { color: red; margin-top: 10px; font-size: 0.9em; display: none; }
+
+        /* --- 查询控制区样式 --- */
+        #queryControl {
+            background-color: #ffffff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            display: flex; 
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap; 
+        }
+        #trainInput { 
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 150px;
+        }
+        button.query-btn {
+            padding: 10px 15px;
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button.query-btn:hover { background-color: #1558b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        /* --- 状态信息样式 --- */
+        #statusMessage {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .success { color: green; }
+        .error { color: white; background-color: #dc3545; }
+        
+        /* --- Schedule/Calendar Styles --- */
+        #scheduleContainer { margin-top: 30px; margin-bottom: 20px; }
+        .calendar-box {
+            background-color: #ffffff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .calendar-header {
+            text-align: center;
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .calendar-header strong { margin: 0 15px; }
+        .nav-btn {
+            padding: 5px 10px;
+            background-color: #f0f0f0;
+            color: #333;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+        }
+        .calendar-table { width: 100%; border-collapse: collapse; }
+        .calendar-table th { font-weight: normal; padding: 10px 5px; color: #666; border-bottom: 1px solid #eee; }
+        .calendar-day {
+            padding: 8px;
+            text-align: center;
+            font-size: 0.9em;
+            border: 1px solid #eee;
+            height: 40px;
+            vertical-align: middle;
+        }
+        .calendar-day.empty { background-color: #f9f9f9; cursor: default; }
+        .calendar-day.pending { background-color: #e3f2fd; cursor: wait; }
+        .calendar-day.not-running { background-color: #e0e0e0; color: #999; cursor: default; }
+        .calendar-day.running {
+            background-color: #ffffff;
+            cursor: pointer;
+            font-weight: bold;
+            color: #1a73e8;
+            transition: background-color 0.2s;
+        }
+        .calendar-day.running:hover { background-color: #f0f4f7; }
+        .calendar-day.today { border: 2px solid #ff6347; border-radius: 4px; }
+
+        /* --- 详细信息容器 --- */
+        .consist-detail-box {
+            margin-top: 30px; 
+            padding: 15px; 
+            border: 1px solid #ccc; 
+            background-color: #ffffff;
+            border-radius: 6px;
+            overflow-x: auto; 
+        }
+        .consist-info { margin-top: 5px; margin-bottom: 15px; font-size: 1em; color: #555; }
+
+        /* --- 基本信息样式 --- */
+        .basic-info-box {
+            border-left: 5px solid #1a73e8;
+            margin-bottom: 15px !important;
+            margin-top: 10px !important;
+            padding: 15px; 
+            background-color: #ffffff; 
+            border-radius: 6px; 
+        }
+        .error-box { border-left: 5px solid #dc3545 !important; background-color: #fbecec !important; }
+        
+        .basic-info-station-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85em; }
+        .basic-info-station-table th, .basic-info-station-table td { border: 1px solid #e0e0e0; padding: 6px; text-align: center; }
+        .basic-info-station-table th { background-color: #f0f4f7; color: #333; }
+        .basic-info-station-table td:nth-child(7) { white-space: normal; }
+
+        /* --- 车型信息表格 --- */
+        .trainset-info-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9em; }
+        .trainset-info-table td { border: 1px solid #e0e0e0; padding: 8px; width: 25%; text-align: left; }
+        .trainset-info-table td:nth-child(odd) { background-color: #f0f4f7; font-weight: bold; color: #333; }
+
+        /* --- 编组表格样式 --- */
+        .consist-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .consist-table th, .consist-table td { border: 1px solid #bbb; padding: 8px; text-align: center; font-size: 0.9em; white-space: nowrap; }
+        .consist-table th { background-color: #3498db; color: white; font-weight: bold; }
+        .consist-table tbody tr:nth-child(odd) { background-color: #ecf0f1; }
+        .car-type-c { background-color: #fff8e1; font-weight: bold; color: #f39c12; }
+
+        /* --- 重联/样式 --- */
+        .coupled-box { border-color: #f39c12 !important; background-color: #fef9e7 !important; padding-bottom: 0 !important; }
+        .coupled-title { color: #f39c12; font-weight: bold; border-bottom: 2px dashed #f39c12; padding-bottom: 8px; margin-bottom: 15px; }
+        .single-consist { border: 1px solid #ddd; margin-bottom: 15px; padding: 10px; border-radius: 4px; background-color: #ffffff; }
+        
+        .emu-no-clickable { cursor: pointer; color: #1a73e8; text-decoration: underline; transition: color 0.2s; }
+        .emu-no-clickable:hover { color: #1558b3; }
+
+        /* --- 历史表格样式 --- */
+        .history-table { width: 90%; margin: 15px auto 5px auto; border-collapse: collapse; font-size: 0.85em; }
+        .history-table th, .history-table td { border: 1px solid #e0e0e0; padding: 6px; text-align: center; }
+        .history-table th { background-color: #f0f4f7; color: #333; }
+        .close-history-btn { float: right; cursor: pointer; font-weight: bold; color: #dc3545; padding: 0 5px; border: 1px solid #dc3545; border-radius: 3px; }
+        .history-table td:last-child { white-space: normal; text-align: left; }
+        .history-train-link { cursor: pointer; color: #28a745; text-decoration: underline; margin: 0 5px; }
+        .history-train-link:hover { color: #1e7e34; }
+        .missing-link { color: #f39c12; font-weight: bold; font-size: 0.9em; margin: 0 5px; }
+    /* --- 新增：参数信息网格样式 --- */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9em;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 8px;
+            background: white;
+            border-radius: 3px;
+            border: 1px solid #e0e0e0;
+        }
+        .info-label {
+            color: #666;
+            font-weight: normal;
+            margin-right: 8px;
+        }
+        .info-value {
+            color: #333;
+            font-weight: bold;
+            text-align: right;
+        }
+
+        /* 专门用于下方定员信息的样式微调 */
+        .capacity-grid {
+            margin-top: 15px;
+            background-color: #f0f7ff; /* 浅蓝色背景区分 */
+            border-color: #d0e3f5;
+        }
+        .capacity-grid .info-item {
+            border-color: #cce5ff;
+        }
+    </style>
+</head>
+<body>
+    <a id="top"></a>
+    
+    <div id="loginModal">
+        <div class="login-content">
+            <h3>🔒 系统登录</h3>
+            <p>请输入密码以访问编组数据库</p>
+            <input type="password" id="apiPassword" placeholder="输入密码" onkeydown="if(event.keyCode==13) performLogin()">
+            <button class="login-btn" onclick="performLogin()">登录</button>
+            <p id="loginError" class="login-error">密码错误或连接失败</p>
+        </div>
+    </div>
+
+    <h1>🚅 列车运行信息综合查询系统</h1>
+
+    <div id="queryControl">
+        <label for="trainInput">输入车次：</label>
+        <input type="text" id="trainInput"  value="G1" required>
+        <button id="mainQueryBtn" class="query-btn" onclick="queryTrainData(document.getElementById('trainInput').value.trim().toUpperCase(), TODAY_DATE_STR, true)">查询</button>
+    </div>
+
+    <p id="statusMessage" class="success">请先登录系统...</p>
+    
+    <div id="scheduleContainer">
+        <h2>🗓️ 开行规律</h2>
+        <div class="calendar-box">
+            <div id="monthTitle" class="calendar-header">
+                请先输入车次并点击查询。
+            </div>
+            <div id="scheduleStatus" style="text-align: center; margin: 10px 0; font-size: 0.9em; color: #666;">
+                等待查询...
+            </div>
+            <table class="calendar-table">
+                <thead>
+                    <tr>
+                        <th>一</th><th>二</th><th>三</th><th>四</th><th>五</th><th>六</th><th>日</th>
+                    </tr>
+                </thead>
+                <tbody id="calendarBody"></tbody>
+            </table>
+        </div>
+    </div>
+    <div id="consistDetailsContainer">
+        <h2>📄 详细信息</h2>
+        <div class="consist-detail-box">输入车次、点击查询以查看详细编组历史和基本信息。</div>
+    </div>
+
+    <script>
+        // === API 配置 ===
+        const API_BASE_URL_TRAIN = "https://frank1225.dynv6.net:16667/"; 
+        const API_BASE_URL_HISTORY = "https://frank1225.dynv6.net:16668/"; 
+        const API_PROXY_URL_BASIC_INFO = 'https://frank1225.dynv6.net:16669/api'; 
+        
+        // 编组数据库 API
+        const CONSIST_API_BASE = "https://frank1225.dynv6.net:5125";
+        const CONSIST_API_LOGIN = `${CONSIST_API_BASE}/api/login`;
+        const CONSIST_API_QUERY = `${CONSIST_API_BASE}/api/data`;
+
+        // 全局变量
+        let API_AUTH_TOKEN = null;  // 存储登录 Token
+        let CONSIST_DATA_MAP = new Map(); // 缓存本次会话查到的编组数据
+        
+        let TODAY_DATE_STR = '';         
+        let currentCalendarDate = new Date(); 
+        let cachedConsistHistoryData = []; 
+        let lastQueriedTrainNo = '';       
+        let basicInfoCache = new Map(); 
+
+        // 局名映射表
+        const BUREAU_MAP = {
+            'P': '北京局', 'H': '上海局', 'Q': '广州局', 'Z': '南宁局', 'G': '南昌局',
+            'W': '成都局', 'M': '昆明局', 'N': '武汉局', 'F': '郑州局', 'K': '济南局',
+            'T': '沈阳局', 'B': '哈尔滨局', 'C': '呼和局', 'V': '太原局', 'Y': '西安局',
+            'J': '兰州局', 'R': '乌鲁木齐局', 'O': '青藏集团'
+        };
+
+        const CHINA_LAOS_STATIONS = [
+            '磨丁', '纳堆', '纳磨', '孟赛', '孟阿', 
+            '琅勃拉邦', '嘎西', '万荣', '蓬洪', '万象'
+        ];
+
+        // ----------------------------------------------------
+        // 1. 登录逻辑
+        // ----------------------------------------------------
+        
+        async function performLogin() {
+            const password = document.getElementById('apiPassword').value;
+            const errorMsg = document.getElementById('loginError');
+            
+            if (!password) return;
+
+            try {
+                const response = await fetch(CONSIST_API_LOGIN, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.auth_key) {
+                        API_AUTH_TOKEN = data.auth_key;
+                        document.getElementById('loginModal').style.display = 'none';
+                        document.getElementById('statusMessage').textContent = '✅ 登录成功，系统就绪。';
+                        document.getElementById('statusMessage').className = 'success';
+                    } else {
+                        throw new Error('No auth key received');
+                    }
+                } else {
+                    errorMsg.style.display = 'block';
+                    errorMsg.textContent = '密码错误，请重试。';
+                }
+            } catch (e) {
+                console.error(e);
+                errorMsg.style.display = 'block';
+                errorMsg.textContent = '连接服务器失败。';
+            }
+        }
+
+        // ----------------------------------------------------
+        // 2. 编组数据获取 (新 API 实现)
+        // ----------------------------------------------------
+
+        /**
+         * 从 API 获取单个动车组的详细信息
+         * 后端会自动匹配“查询用车组号”字段
+         */
+        async function fetchConsistByEmuNo(emuNo) {
+            if (CONSIST_DATA_MAP.has(emuNo)) return; // 已缓存
+
+            // Python 后端会处理 train_search 的格式（去横杠），这里直接传 emu_no
+            const payload = {
+                "draw": 1,
+                "start": 0,
+                "length": 1, // 只需要一条最匹配的记录
+                "custom_filters": {
+                    "train": emuNo 
+                }
+            };
+
+            try {
+                const response = await fetch(CONSIST_API_QUERY, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-Key': API_AUTH_TOKEN
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    const json = await response.json();
+                    if (json.data && json.data.length > 0) {
+                        // 存入 Map，key 为原始 emuNo
+                        CONSIST_DATA_MAP.set(emuNo, {
+                            record: json.data[0],
+                            raw_key: emuNo
+                        });
+                    }
+                } else {
+                    console.warn(`Fetch consist failed for ${emuNo}: ${response.status}`);
+                }
+            } catch (e) {
+                console.error(`Network error fetching consist for ${emuNo}`, e);
+            }
+        }
+
+        /**
+         * 批量获取历史记录中出现的所有动车组的编组信息
+         */
+        async function prefetchConsistsForHistory(historyData) {
+            if (!historyData || historyData.length === 0) return;
+
+            const uniqueEmus = new Set();
+            historyData.forEach(item => {
+                if (item.emu_no) uniqueEmus.add(item.emu_no);
+            });
+
+            const promises = Array.from(uniqueEmus).map(emu => fetchConsistByEmuNo(emu));
+            
+            // 并行请求
+            const statusElement = document.getElementById('statusMessage');
+            statusElement.textContent += ` (正在获取 ${uniqueEmus.size} 组编组详情...)`;
+            
+            await Promise.all(promises);
+        }
+
+        // ----------------------------------------------------
+        // 3. 辅助函数
+        // ----------------------------------------------------
+
+        function shouldSkipEmuHistory(trainNo) {
+            if (!trainNo || trainNo.length === 0) return true;
+            const upperTrainNo = trainNo.toUpperCase();
+            const firstChar = upperTrainNo.charAt(0);
+            if (firstChar === 'S') return true;
+            if (['Z', 'T', 'K', 'L', 'Y'].includes(firstChar)) return true;
+            if (upperTrainNo.length === 4 && /^\d{4}$/.test(upperTrainNo)) return true;
+            return false;
+        }
+
+        function cleanEmuKey(rawKey) {
+            // 前端主要负责展示和缓存键，API请求直接用 rawKey 交给后端模糊匹配
+            return rawKey; 
+        }
+
+        function formatDateToYYYYMMDD(date) {
+            const yyyy = date.getFullYear();
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const dd = String(date.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
+        
+        function formatTime(timeStr) { 
+            if (!timeStr || timeStr === '--' || timeStr.length < 3) return timeStr;
+            let timePartMatch = timeStr.match(/(\d{4})$/); 
+            let cleaned = timePartMatch ? timePartMatch[1] : timeStr.replace(/[^0-9]/g, '');
+            if (cleaned.length === 4) {
+                return `${parseInt(cleaned.substring(0, 2), 10)}:${cleaned.substring(2, 4)}`;
+            }
+            return timeStr; 
+        }
+
+        function formatDayDifference(dayDiff) { 
+            const diff = parseInt(dayDiff, 10);
+            if (isNaN(diff)) return '---';
+            if (diff === 0) return '当天';
+            return `第${diff + 1}天`;
+        }
+
+        function formatStationCorporationCode(stationName, code) { 
+            if (stationName === '香港西九龙') return '港铁公司';
+            if (CHINA_LAOS_STATIONS.includes(stationName)) return '中老铁路公司';
+            if (!code || typeof code !== 'string' || code === '---') return '---';
+            const parts = code.split('#');
+            if (parts.length !== 2) return code; 
+            const bureauCode = parts[0].toUpperCase();
+            let stationSectionName = parts[1].trim();
+            const fullBureauName = BUREAU_MAP[bureauCode] || `${bureauCode}局`;
+            if (stationSectionName && !stationSectionName.endsWith('段')) {
+                stationSectionName += '直属站';
+            } else if (!stationSectionName) {
+                stationSectionName = '未知站段';
+            }
+            return `${fullBureauName}${stationSectionName}`;
+        }
+
+        // ----------------------------------------------------
+        // 4. 日历逻辑
+        // ----------------------------------------------------
+        
+        function getDaysInMonth(year, month) {
+            return new Date(year, month + 1, 0).getDate();
+        }
+        
+        async function checkTrainRun(trainCode, dateStr) {
+            const result = await fetchBasicTrainInfo(trainCode, dateStr); 
+            return result.success && result.info && result.info.stations.length > 0;
+        }
+
+        async function checkScheduleForMonth(year, month, trainNo) {
+            const daysInMonth = getDaysInMonth(year, month);
+            const dateChecks = [];
+            const scheduleStatus = document.getElementById('scheduleStatus');
+            
+            if (!trainNo) {
+                scheduleStatus.textContent = `请输入车次进行开行规律查询。`;
+                return;
+            }
+            
+            scheduleStatus.textContent = `正在查询 ${year}年${month + 1}月 ${trainNo} 的开行规律...`;
+            
+            for (let day = 1; day <= daysInMonth; day++) {
+                const date = new Date(year, month, day);
+                const dateStr = formatDateToYYYYMMDD(date);
+                const checkPromise = checkTrainRun(trainNo, dateStr).then(isRunning => {
+                    return { day: day, isRunning: isRunning, dateStr: dateStr };
+                });
+                dateChecks.push(checkPromise);
+            }
+            
+            const results = await Promise.all(dateChecks);
+
+            results.forEach(result => {
+                const dayCell = document.getElementById(`day-${result.dateStr}`);
+                if (dayCell) {
+                    dayCell.className = `calendar-day ${result.isRunning ? 'running' : 'not-running'} ${dayCell.classList.contains('today') ? 'today' : ''}`;
+                    if (result.isRunning) {
+                        dayCell.onclick = () => { queryTrainData(trainNo, result.dateStr, false); };
+                    } else {
+                        dayCell.onclick = null; 
+                    }
+                }
+            });
+            scheduleStatus.textContent = `✅ ${year}年${month + 1}月 ${trainNo} 开行规律查询完成。`;
+        }
+
+        function renderCalendar(trainNo) {
+            const calendarContainer = document.getElementById('calendarBody');
+            const monthTitle = document.getElementById('monthTitle');
+            const year = currentCalendarDate.getFullYear();
+            const month = currentCalendarDate.getMonth();
+            
+            if (!calendarContainer || !monthTitle || !trainNo) return;
+            
+            monthTitle.innerHTML = `<button class="nav-btn" onclick="navigateCalendar(-1, '${trainNo}')">◀</button>
+                                    <strong>${year}年${month + 1}月</strong>
+                                    <button class="nav-btn" onclick="navigateCalendar(1, '${trainNo}')">▶</button>`;
+            
+            calendarContainer.innerHTML = ''; 
+            const firstDayOfMonth = new Date(year, month, 1).getDay(); 
+            const startOffset = (firstDayOfMonth === 0) ? 6 : firstDayOfMonth - 1; 
+            const daysInMonth = getDaysInMonth(year, month);
+            const todayStr = TODAY_DATE_STR; 
+
+            let dayCounter = 1;
+            for (let i = 0; i < 6; i++) { 
+                const row = document.createElement('tr');
+                let rowContent = '';
+                let hasRealDay = false;
+                for (let j = 0; j < 7; j++) { 
+                    const currentCellIndex = i * 7 + j;
+                    if (currentCellIndex < startOffset || dayCounter > daysInMonth) {
+                        rowContent += '<td class="calendar-day empty"></td>';
+                    } else {
+                        const date = new Date(year, month, dayCounter);
+                        const dateStr = formatDateToYYYYMMDD(date);
+                        const isToday = todayStr === dateStr;
+                        rowContent += `<td class="calendar-day pending ${isToday ? 'today' : ''}" id="day-${dateStr}" title="点击查询 ${trainNo} ${dateStr} 详情">${dayCounter}</td>`;
+                        dayCounter++;
+                        hasRealDay = true;
+                    }
+                }
+                row.innerHTML = rowContent;
+                if (hasRealDay) calendarContainer.appendChild(row);
+                if (dayCounter > daysInMonth) break; 
+            }
+            checkScheduleForMonth(year, month, trainNo);
+        }
+
+        function navigateCalendar(offset, trainNo) {
+            const year = currentCalendarDate.getFullYear();
+            const month = currentCalendarDate.getMonth();
+            currentCalendarDate = new Date(year, month + offset, 1); 
+            renderCalendar(trainNo);
+        }
+
+        function resetCalendar(trainNo) {
+            const today = new Date();
+            currentCalendarDate = new Date(today.getFullYear(), today.getMonth(), 1);
+            renderCalendar(trainNo);
+        }
+        
+        // ----------------------------------------------------
+        // 5. 数据查询逻辑 (基本信息 & 自动搜索)
+        // ----------------------------------------------------
+
+        async function fetchBasicTrainInfo(trainCode, rawStartDay) { 
+            const upperTrainCode = trainCode.toUpperCase();
+            const cacheKey = `${upperTrainCode}_${rawStartDay}`;
+            if (basicInfoCache.has(cacheKey)) return basicInfoCache.get(cacheKey);
+            
+            const startDay = rawStartDay.replace(/-/g, ''); 
+            const requestData = { trainCode: upperTrainCode, startDay: startDay };
+            
+            try {
+                const response = await fetch(API_PROXY_URL_BASIC_INFO, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, 
+                    body: new URLSearchParams(requestData) 
+                });
+
+                if (!response.ok) {
+                    const result = { success: false, message: `基本信息代理请求失败 ${response.status}。` };
+                    basicInfoCache.set(cacheKey, result);
+                    return result;
+                }
+
+                const data = await response.json();
+                if (data.status === true && data.data && data.data.trainDetail) {
+                    const stopTimes = data.data.trainDetail.stopTime || [];
+                    if (stopTimes.length === 0) {
+                        const result = { success: false, message: "基本信息 API：无停站信息。" };
+                        basicInfoCache.set(cacheKey, result);
+                        return result;
+                    }
+                    
+                    const startStationInfo = stopTimes[0];
+                    const endStationInfo = stopTimes[stopTimes.length - 1];
+                    const basicInfo = {
+                        train_no: trainCode,
+                        start_station_name: startStationInfo.start_station_name,
+                        startTime: startStationInfo.startTime, 
+                        end_station_name: endStationInfo.stationName, 
+                        arriveTime: endStationInfo.arriveTime, 
+                        jiaolu_corporation_code: startStationInfo.jiaolu_corporation_code, 
+                        jiaolu_dept_train: startStationInfo.jiaolu_dept_train, 
+                        emu_style_no_primary: startStationInfo.train_style, 
+                        emu_style_no_fallback: startStationInfo.jiaolu_train_style, 
+                        trainsetTypeInfo: data.data.trainDetail.trainsetTypeInfo || null,
+                        stations: stopTimes.map(s => ({
+                            station_no: s.stationNo,
+                            station_name: s.stationName,
+                            arrive_time: s.arriveTime, 
+                            start_time: s.startTime, 
+                            stop_time: s.stopover_time,
+                            dayDifference: s.dayDifference !== undefined ? s.dayDifference : 0, 
+                            station_corporation_code: s.stationCorporationCode || s.station_corporation_code || '---', 
+                            waitingRoom: s.waitingRoom || '---', 
+                            wicket: s.wicket || '---',           
+                            exit: s.exit || '---',              
+                        }))
+                    };
+                    const result = { success: true, info: basicInfo };
+                    basicInfoCache.set(cacheKey, result);
+                    return result;
+                }
+                const result = { success: false, message: data.errorMsg || "基本信息 API 返回异常。" };
+                basicInfoCache.set(cacheKey, result);
+                return result;
+            } catch (error) {
+                const result = { success: false, message: `网络错误: ${error.message}` };
+                basicInfoCache.set(cacheKey, result);
+                return result;
+            }
+        }
+
+        async function fetchTrainEndpoints(trainCode, fullTimestamp) {
+            const rawStartDay = fullTimestamp.substring(0, 10);
+            const upperTrainCode = trainCode.toUpperCase();
+            const cacheKey = `${upperTrainCode}_${rawStartDay}`;
+            const cachedResult = basicInfoCache.get(cacheKey);
+
+            if (cachedResult && cachedResult.success) {
+                return {
+                    start: cachedResult.info.start_station_name || '未知站',
+                    end: cachedResult.info.end_station_name || '未知站'
+                };
+            }
+            // Fallback request
+            const startDay = rawStartDay.replace(/-/g, ''); 
+            try {
+                const response = await fetch(API_PROXY_URL_BASIC_INFO, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, 
+                    body: new URLSearchParams({ trainCode: upperTrainCode, startDay: startDay }) 
+                });
+                if (!response.ok) throw new Error();
+                const data = await response.json();
+                if (data.status === true && data.data && data.data.trainDetail) {
+                    const stopTimes = data.data.trainDetail.stopTime || [];
+                    if (stopTimes.length < 1) return { start: '未知站', end: '未知站' };
+                    return {
+                        start: stopTimes[0].start_station_name || '未知站',
+                        end: stopTimes[stopTimes.length - 1].stationName || '未知站'
+                    };
+                }
+                return { start: '未知站', end: '未知站' };
+            } catch (error) {
+                return { start: '查询失败', end: '查询失败' };
+            }
+        }
+
+        async function searchForRunningDate(trainCode, rawStartDate) {
+            const start = new Date(rawStartDate);
+            // 后搜 30 天
+            for (let i = 1; i <= 30; i++) {
+                const searchDate = new Date(start);
+                searchDate.setDate(start.getDate() + i);
+                const dateStr = formatDateToYYYYMMDD(searchDate);
+                const isRunning = await checkTrainRun(trainCode, dateStr);
+                if (isRunning) return { date: dateStr, direction: 'forward', days: i };
+            }
+            // 前搜 180 天
+            for (let i = 1; i <= 180; i++) {
+                const searchDate = new Date(start);
+                searchDate.setDate(start.getDate() - i);
+                const dateStr = formatDateToYYYYMMDD(searchDate);
+                if (searchDate.getFullYear() < 2000) break;
+                const isRunning = await checkTrainRun(trainCode, dateStr);
+                if (isRunning) return { date: dateStr, direction: 'backward', days: i };
+            }
+            return null; 
+        }
+
+        // ----------------------------------------------------
+        // 6. 主查询控制器
+        // ----------------------------------------------------
+
+        async function queryTrainData(manualTrainNo, manualStartDate, isFullQuery = true) {
+            // 验证登录状态
+            if (!API_AUTH_TOKEN) {
+                document.getElementById('loginModal').style.display = 'flex';
+                return;
+            }
+
+            const trainInput = document.getElementById('trainInput');
+            const trainNo = (manualTrainNo || trainInput.value).trim().toUpperCase(); 
+            const startDate = manualStartDate || TODAY_DATE_STR; 
+
+            if (trainNo) trainInput.value = trainNo; 
+
+            const statusElement = document.getElementById('statusMessage');
+            const consistDetailsContainer = document.getElementById('consistDetailsContainer');
+
+            if (!trainNo || trainNo.length > 6 || trainNo.length < 2) {
+                statusElement.textContent = '错误：车次格式错误。';
+                statusElement.className = 'error';
+                return;
+            }
+            
+            if (trainNo !== lastQueriedTrainNo) isFullQuery = true;
+            
+            consistDetailsContainer.innerHTML = '<h2>📄 详细信息</h2><div class="consist-detail-box">正在请求数据... 请稍候。</div>';
+            
+            const skipHistory = shouldSkipEmuHistory(trainNo); 
+            let isConsistHistoryApiFailed = false;
+            let isHistorySkipped = false;          
+            
+            if (skipHistory) {
+                isHistorySkipped = true;
+                cachedConsistHistoryData = [];
+                if (trainNo !== lastQueriedTrainNo || isFullQuery) {
+                    lastQueriedTrainNo = trainNo; 
+                    resetCalendar(trainNo);
+                }
+            }
+
+            if (isFullQuery && !skipHistory) {
+                statusElement.textContent = `正在查询 ${trainNo} 的历史担当和基本信息...`;
+                statusElement.className = '';
+                lastQueriedTrainNo = trainNo; 
+                resetCalendar(trainNo); 
+                
+                // Fetch History
+                try {
+                    const response = await fetch(`${API_BASE_URL_TRAIN}${trainNo}`);
+                    if (!response.ok) throw new Error();
+                    const rawData = await response.json();
+                    cachedConsistHistoryData = Array.isArray(rawData) ? rawData : [];
+                    
+                    // **关键步骤：从新的 API 预加载编组信息**
+                    if (cachedConsistHistoryData.length > 0) {
+                        await prefetchConsistsForHistory(cachedConsistHistoryData);
+                    }
+
+                } catch (error) {
+                    console.error('History API Error:', error);
+                    isConsistHistoryApiFailed = true;
+                    cachedConsistHistoryData = [];
+                }
+                
+            } else if (!isFullQuery && !skipHistory) { 
+                statusElement.textContent = `正在查询 ${trainNo} (${startDate}) 的基本信息`;
+                isConsistHistoryApiFailed = cachedConsistHistoryData.length === 0;
+            }
+            
+            const basicInfoResult = await fetchBasicTrainInfo(trainNo, startDate);
+            
+            let suggestedDateResult = null;
+            if (!basicInfoResult.success && !skipHistory) {
+                statusElement.textContent = `⚠️ 车次 ${trainNo} 在 ${startDate} 不开行。正在自动搜索最近开行日期...`;
+                statusElement.className = 'error';
+                suggestedDateResult = await searchForRunningDate(trainNo, startDate);
+                
+                if (suggestedDateResult) {
+                    const newDate = suggestedDateResult.date;
+                    const directionText = suggestedDateResult.direction === 'forward' ? '向后' : '向前';
+                    const days = suggestedDateResult.days;
+                    statusElement.textContent = `✅ 自动搜索成功！已跳转至：${newDate} (相对 ${startDate} ${directionText} ${days} 天)。`;
+                    statusElement.className = 'success'; 
+                    await queryTrainData(trainNo, newDate, true); 
+                    document.getElementById('top').scrollIntoView({ behavior: 'smooth' });
+                    return; 
+                } else {
+                    statusElement.textContent = `❌ ${startDate} 不开行。自动搜索未找到相近日期。`;
+                    statusElement.className = 'error';
+                }
+            } else if (!basicInfoResult.success && skipHistory) {
+                 statusElement.textContent = `⚠️ 普速/市郊车次 ${trainNo} 在 ${startDate} 不开行: ${basicInfoResult.message}。`;
+                 statusElement.className = 'error';
+            }
+
+            renderResults(cachedConsistHistoryData, trainNo, basicInfoResult, isConsistHistoryApiFailed, isHistorySkipped, startDate, suggestedDateResult);
+            
+            if (basicInfoResult.success) {
+                 statusElement.textContent = `✅ 查询成功。`;
+                 statusElement.className = 'success';
+            }
+            document.getElementById('top').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // ----------------------------------------------------
+        // 7. 渲染逻辑 (UI)
+        // ----------------------------------------------------
+
+        function toggleStationTable() {
+            const container = document.getElementById('fullStationTableContainer');
+            const toggle = document.getElementById('stationInfoToggle');
+            if (!container || !toggle) return; 
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                toggle.textContent = '停站信息 (点击隐藏)';
+                toggle.style.color = '#dc3545'; 
+            } else {
+                container.style.display = 'none';
+                toggle.textContent = '停站信息 (点击显示)';
+                toggle.style.color = '#1a73e8'; 
+            }
+        }
+
+        function toggleTrainsetTypeInfo() {
+            const container = document.getElementById('fullTrainsetTypeInfoContainer');
+            const toggle = document.getElementById('trainsetTypeInfoToggle');
+            if (!container || !toggle) return;
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                toggle.textContent = '车辆信息 (点击隐藏)';
+                toggle.style.color = '#dc3545';
+            } else {
+                toggle.textContent = '车辆信息 (点击显示)';
+                toggle.style.color = '#1a73e8';
+                container.style.display = 'none';
+            }
+        }
+
+        function generateBasicInfoHtml(info, trainNo, userStartDate, suggestedDateResult) {
+            const parts = userStartDate.split('-'); 
+            const displayDateStr = parts.length === 3 ? `${parts[0]}年${parts[1]}月${parts[2]}日` : userStartDate;
+
+            if (!info || !info.success) {
+                let errorHtml = `<div class="basic-info-box error-box"><p style="color: red; font-weight: bold;">❌ 车次 ${trainNo} 在 ${displayDateStr} 不开行: ${info.message || '未知错误'}</p>`;
+                if (suggestedDateResult) {
+                    errorHtml += `<p style="color: #c0392b; margin-top: 10px;">系统已自动搜索，但<strong style="color: red;">未找到开行日期</strong>。</p>`;
+                } else if (!shouldSkipEmuHistory(trainNo)) {
+                     errorHtml += `<p style="color: #c0392b; margin-top: 10px;">请在上方日历中手动选择其他日期</p>`;
+                }
+                errorHtml += `</div>`;
+                return errorHtml;
+            }
+
+            const trainInfo = info.info;
+            const formattedStartTime = formatTime(trainInfo.startTime.substring(9) || trainInfo.startTime);
+            const formattedArriveTime = formatTime(trainInfo.arriveTime.substring(9) || trainInfo.arriveTime);
+            
+            // 型号显示
+            const emuStylePrimary = trainInfo.emu_style_no_primary || ''; 
+            const emuStyleFallback = trainInfo.emu_style_no_fallback || ''; 
+            let emuStyleDisplay;
+            if (emuStylePrimary && emuStyleFallback && emuStylePrimary !== emuStyleFallback) {
+                emuStyleDisplay = `${emuStyleFallback} (${emuStylePrimary})`;
+            } else {
+                emuStyleDisplay = emuStylePrimary || emuStyleFallback || '无信息';
+            }
+
+            const trainsetTypeInfo = trainInfo.trainsetTypeInfo;
+            const newTitle = `${trainNo}次 （${trainInfo.start_station_name || '未知'}→${trainInfo.end_station_name || '未知'}） ${displayDateStr} 列车开行信息`;
+            
+            let infoHtml = `
+                <div class="basic-info-box">
+                    <h3 style="color: #333; border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-bottom: 15px;">${newTitle}</h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px 30px; font-size: 0.95em;">
+                        <div style="min-width: 220px;"><strong>始发站/时间:</strong> <strong>${trainInfo.start_station_name}</strong> (${formattedStartTime})</div>
+                        <div style="min-width: 220px;"><strong>终到站/时间:</strong> <strong>${trainInfo.end_station_name}</strong> (${formattedArriveTime})</div>
+                        <div style="min-width: 220px;"><strong>担当型号:</strong> <strong style="color:#e67e22;">${emuStyleDisplay}</strong></div>
+                        <div style="min-width: 220px;"><strong>客运担当:</strong> ${trainInfo.jiaolu_corporation_code || '无信息'}</div>
+                        <div style="min-width: 220px;"><strong>车底担当:</strong> ${trainInfo.jiaolu_dept_train || '无信息'}</div>
+                    </div>`;
+
+            // 停站信息
+            infoHtml += `<h4 id="stationInfoToggle" onclick="toggleStationTable()" style="margin-top: 20px; color: #1a73e8; cursor: pointer; text-decoration: underline;">停站信息 (点击显示)</h4>
+                <div id="fullStationTableContainer" style="display: none;">`; 
+            
+            const stations = trainInfo.stations || [];
+            if (stations.length === 0) {
+                infoHtml += `<p>无停站信息。</p>`;
+            } else {
+                infoHtml += `<table class="basic-info-station-table"><thead><tr>
+                        <th style="width: 5%;">站序</th><th style="width: 13%;">车站</th><th style="width: 10%;">到达时间</th><th style="width: 10%;">发车时间</th>
+                        <th style="width: 7%;">停车时间</th><th style="width: 7%;">天数</th><th style="width: 18%;">车站隶属</th>
+                        <th style="width: 10%;">候车室</th><th style="width: 10%;">进站口</th><th style="width: 10%;">出站口</th>
+                    </tr></thead><tbody>`;
+                
+                stations.forEach((station, index) => { 
+                    const isFirst = index === 0;
+                    const isLast = index === stations.length - 1;
+                    infoHtml += `<tr>
+                        <td>${station.station_no || (station.start_time === '-' ? '终点' : '--')}</td>
+                        <td>${station.station_name}</td>
+                        <td>${isFirst ? '---' : formatTime(station.arrive_time.substring(9) || station.arrive_time)}</td>
+                        <td>${isLast ? '---' : formatTime(station.start_time.substring(9) || station.start_time)}</td>
+                        <td>${station.stop_time || '---'}</td>
+                        <td>${formatDayDifference(station.dayDifference)}</td>
+                        <td>${formatStationCorporationCode(station.station_name, station.station_corporation_code)}</td>
+                        <td>${station.waitingRoom || '---'}</td>
+                        <td>${station.wicket || '---'}</td>
+                        <td>${station.exit || '---'}</td>
+                    </tr>`;
+                });
+                infoHtml += `</tbody></table>`;
+            }
+            infoHtml += `</div>`; 
+            
+            // 车型信息
+            if (trainsetTypeInfo && Object.keys(trainsetTypeInfo).length > 0) {
+                const infoMap = [
+                    ['车型', trainsetTypeInfo.trainsetTypeName], ['辆数', trainsetTypeInfo.coachCount],
+                    ['总长', trainsetTypeInfo.fullLength], ['车辆组成', trainsetTypeInfo.coachOrganization],
+                    ['定员', trainsetTypeInfo.capacity], ['最大运营速度', trainsetTypeInfo.currentSpeed],
+                    ['制造厂商', trainsetTypeInfo.manufacturer], ['餐车位置', trainsetTypeInfo.mealCoach],
+                ];
+                infoHtml += `<h4 id="trainsetTypeInfoToggle" onclick="toggleTrainsetTypeInfo()" style="margin-top: 20px; color: #1a73e8; cursor: pointer; text-decoration: underline;">车辆信息 (点击显示)</h4>
+                    <div id="fullTrainsetTypeInfoContainer" style="display: none;">
+                        <table class="trainset-info-table"><tbody>`;
+                for (let i = 0; i < infoMap.length; i += 2) {
+                    infoHtml += `<tr><td>${infoMap[i][0]}</td><td>${infoMap[i][1] || '无信息'}</td>`;
+                    if (i + 1 < infoMap.length) infoHtml += `<td>${infoMap[i+1][0]}</td><td>${infoMap[i+1][1] || '无信息'}</td></tr>`;
+                    else infoHtml += `<td colspan="2"></td></tr>`;
+                }
+                infoHtml += `</tbody></table></div>`;
+            }
+
+            infoHtml += `</div>`; 
+            return infoHtml;
+        }
+
+        // ----------------------------------------------------
+        // 7. 渲染逻辑 (UI)
+        // ----------------------------------------------------
+
+        // 注意：这里需要依赖您已经使用的 generateTechInfoHtml 和 generateCapacityInfoHtml，
+        // 它们必须是已修复的版本（处理了数字类型的字段）。
+        
+        function renderResults(data, trainNo, basicInfoResult, isConsistHistoryApiFailed, isHistorySkipped, userStartDate, suggestedDateResult) {
+            data.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            const groupedByDate = {};
+            data.forEach(record => {
+                const dateKey = record.date.substring(0, 10); 
+                if (!groupedByDate[dateKey]) groupedByDate[dateKey] = [];
+                groupedByDate[dateKey].push(record);
+            });
+
+            const consistDetailsContainer = document.getElementById('consistDetailsContainer');
+            let finalHtml = '<h2>📄 详细信息</h2>';
+            finalHtml += generateBasicInfoHtml(basicInfoResult, trainNo, userStartDate, suggestedDateResult);
+            
+            let consistDetailsHtml = '';
+            
+            if (basicInfoResult.success && data.length > 0) {
+                finalHtml += '<h2 style="margin-top: 30px;">📅 动车组担当历史</h2>';
+                let index = 0; 
+
+                Object.keys(groupedByDate).sort().reverse().forEach(dateKey => {
+                    const records = groupedByDate[dateKey];
+                    let isFaultChangeAlert = false; // 故障换车底警告标记
+
+                    // --- 故障换车底检测逻辑 ---
+                    if (records.length >= 3) {
+                        isFaultChangeAlert = true;
+                    } else if (records.length === 2) {
+                        const emuNo1 = records[0].emu_no;
+                        const emuNo2 = records[1].emu_no;
+
+                        const consistData1 = CONSIST_DATA_MAP.get(emuNo1);
+                        const consistData2 = CONSIST_DATA_MAP.get(emuNo2);
+
+                        // 从 API 数据中获取编组辆数，并确保是数字
+                        let count1 = consistData1 ? parseInt(consistData1.record['编组（辆）'], 10) : 0;
+                        let count2 = consistData2 ? parseInt(consistData2.record['编组（辆）'], 10) : 0;
+                        
+                        // 排除 NaN 的情况
+                        count1 = isNaN(count1) ? 0 : count1;
+                        count2 = isNaN(count2) ? 0 : count2;
+
+                        // 检查是否存在 16 或 17 辆编组
+                        if ((count1 === 16 || count1 === 17) || (count2 === 16 || count2 === 17)) {
+                            isFaultChangeAlert = true;
+                        }
+                    }
+                    // --------------------------
+
+
+                    // --- 1. 单组运行逻辑 ---
+                    if (records.length === 1) {
+                        const record = records[0];
+                        const emuNo = record.emu_no || '未知动车组';
+                        const consistData = CONSIST_DATA_MAP.get(emuNo);
+                        if (consistData) {
+                            consistDetailsHtml += generateConsistBox(consistData, trainNo, emuNo, dateKey, index++);
+                        } else {
+                            consistDetailsHtml += generateErrorBox(trainNo, emuNo, dateKey, index++);
+                        }
+                    } 
+                    
+                    // --- 2. 重联运行/多组担当逻辑 ---
+                    else if (records.length >= 2) {
+                        const coupledIndex = index++;
+                        consistDetailsHtml += `<div class="consist-detail-box coupled-box" id="consist-${coupledIndex}">
+                                <p class="coupled-title">⚡️ 重联运行 (${records.length} 组) | 车次 ${trainNo} | 日期 ${dateKey}</p>`;
+                        
+                        // 插入故障换车底警告
+                        if (isFaultChangeAlert) { 
+                             const alertMessage = records.length >= 3 
+                                 ? `⚠️ 发现 ${records.length} 组担当记录，**极可能为故障换车底**！` 
+                                 : `⚠️ 发现 2 组长编组担当记录，**可能为故障换车底**！`;
+                             consistDetailsHtml += `<p style="color: #c0392b; font-weight: bold; padding: 5px; border: 1px dashed #c0392b; border-radius: 4px; margin-bottom: 10px;">${alertMessage}</p>`;
+                        }
+
+                        records.forEach((record, subIndex) => {
+                            const emuNo = record.emu_no;
+                            const consistData = CONSIST_DATA_MAP.get(emuNo);
+                            const containerId = `consist-sub-${coupledIndex}-${subIndex}`;
+                            
+                            consistDetailsHtml += `<div class="single-consist" id="${containerId}">`; 
+                            
+                            if (consistData) {
+                                const consistRecord = consistData.record;
+                                
+                                // 修正点 1: 优先显示API返回的规范化“车组号”
+                                const displayEmuNo = consistRecord['车组号'] || consistData.raw_key || emuNo;
+                                
+                                // 修正点 2 & 3: 生成技术参数和定员信息
+                                const techInfoHtml = generateTechInfoHtml(consistRecord);
+                                const capacityInfoHtml = generateCapacityInfoHtml(consistRecord);
+
+                                consistDetailsHtml += `
+                                    <p>动车组 ${subIndex + 1}: 
+                                        <strong class="emu-no-clickable" onclick="queryEmuHistory('${emuNo}', '${containerId}')">${displayEmuNo}</strong>
+                                    </p>
+                                    <p class="consist-info">配属：${generateConsistInfo(consistRecord)}</p>
+                                    
+                                    ${techInfoHtml}
+                                    
+                                    ${generateSingleTableContent(consistRecord)}
+                                    
+                                    ${capacityInfoHtml}
+
+                                    <div id="emu-history-${containerId}" style="margin-top: 10px;"></div>`;
+                            } else {
+                                consistDetailsHtml += `<p style="color: red;">动车组 ${subIndex + 1}: <strong>${emuNo}</strong> 编组数据缺失 (数据库中未找到)</p>`;
+                            }
+                            consistDetailsHtml += `</div>`; // 关闭 single-consist
+                        });
+                        consistDetailsHtml += `<a href="#top" style="display: block; text-align: right; margin-top: 10px; color: #1a73e8;">↑ 返回顶部</a></div>`; // 关闭 coupled-box
+                    }
+                });
+            } else {
+                if (isHistorySkipped) {
+                     consistDetailsHtml += `<h2 style="margin-top: 30px;">ℹ️ 跳过动车组担当历史查询</h2>
+                         <div class="consist-detail-box" style="border-color: #2980b9; background-color: #ecf0f1;">
+                             <p style="color: #2c3e50; text-align: center;">车次 ${trainNo} 属于普速/市郊类型，已跳过担当查询。</p>
+                         </div>`;
+                } else if (basicInfoResult.success || isConsistHistoryApiFailed) {
+                    const messageText = isConsistHistoryApiFailed ? 'API请求失败，无法获取历史担当信息。' : `API未返回近期担当记录。`;
+                    consistDetailsHtml += `<h2 style="margin-top: 30px;">⚠️ 动车组担当历史记录</h2>
+                        <div class="consist-detail-box" style="border-color: #f39c12; background-color: #fef9e7;">
+                            <p style="color: #e67e22;">${messageText}</p>
+                        </div>`;
+                }
+            }
+            consistDetailsContainer.innerHTML = finalHtml + consistDetailsHtml;
+        }
+
+        function generateConsistInfo(record) {
+            const bureau = record['配属局'] || '未知';
+            const subdivision = record['配属段'] || '未知';
+            const depot = record['配属所'] || '未知';
+            return `${bureau}${subdivision}${depot}`;
+        }
+
+        function generateSingleTableContent(consistRecord) {
+            // API 返回的编组是字符串或数字
+            const emuCount = parseInt(consistRecord['编组（辆）'], 10);
+            if (isNaN(emuCount) || emuCount <= 0 || emuCount > 20) return `<p style="color: red;">⚠️ 编组数量（${consistRecord['编组（辆）']}）无效。</p>`;
+            
+            let carNoRow = '<tr><th>车号</th>';
+            let carTypeRow = '<tr><th>车种</th>';
+            let capacityRow = '<tr><th>定员</th>';
+            for (let i = 1; i <= emuCount; i++) {
+                const isMaxCar = (i === emuCount);
+                const carNumStr = isMaxCar ? '00' : (i < 10 ? `0${i}` : `${i}`); 
+                const lookupKeyPrefix = i < 10 ? `0${i}` : `${i}`;
+                // API keys: "01车车种", "01车定员"
+                const carType = consistRecord[`${lookupKeyPrefix}车车种`] || 'N/A';
+                const capacity = consistRecord[`${lookupKeyPrefix}车定员`] || 'N/A';
+                const isDiningCar = carType.includes('C') && carType !== 'JC';
+                const diningCarClass = isDiningCar ? ' class="car-type-c"' : '';
+                
+                carNoRow += `<td>${carNumStr}</td>`;
+                carTypeRow += `<td${diningCarClass}>${carType}</td>`;
+                capacityRow += `<td>${capacity}</td>`;
+            }
+            carNoRow += '</tr>';carTypeRow += '</tr>';capacityRow += '</tr>';
+            return `<table class="consist-table">${carNoRow}${carTypeRow}${capacityRow}</table>`;
+        }
+
+        /**
+         * 修正版：生成技术参数 HTML
+         * 修复了数字类型调用 .trim() 报错的问题
+         */
+        function generateTechInfoHtml(record) {
+            const fields = [
+                '制造厂', '制造日期', '最高运营速度（km/h）', '编组（辆）','列车总长（m）', 
+                '轮周牵引总功率（kW）', '编组方式', 
+                '特殊涂装', '备注', '座椅类型'
+            ];
+            
+            let html = '<div class="info-grid">';
+            let hasContent = false;
+
+            fields.forEach(field => {
+                let val = record[field];
+                
+                // 核心修复：先转为字符串，再进行判断
+                // 如果 val 是 null 或 undefined，视为空字符串
+                const strVal = (val === null || val === undefined) ? '' : String(val);
+
+                // 检查：非空、不等于 "/"、去空格后不为空
+                if (strVal && strVal !== '/' && strVal.trim() !== '') {
+                    html += `
+                        <div class="info-item">
+                            <span class="info-label">${field}</span>
+                            <span class="info-value">${strVal}</span>
+                        </div>`;
+                    hasContent = true;
+                }
+            });
+            html += '</div>';
+            return hasContent ? html : '';
+        }
+
+        /**
+         * 修正版：生成定员/席位 HTML
+         * 修复了数字类型调用 .trim() 报错的问题
+         */
+        function generateCapacityInfoHtml(record) {
+            const fields = [
+                'EMIS定员', '席位总数', '客票定员',
+                '商务座-包间式', '商务座-鱼骨式', '商务座-标准型', 
+                '特等座', '优选一等座', '一等座', '二等座', 
+                '高级动卧', '动卧', '多功能座', '餐座', '无座', 
+                '非对号定员-餐座', '非对号定员-边座', '非对号定员-其他', '非对号定员-无座'
+            ];
+
+            let html = '<div class="info-grid capacity-grid">';
+            let hasContent = false;
+
+            fields.forEach(field => {
+                let val = record[field];
+                
+                // 核心修复：先转为字符串
+                const strVal = (val === null || val === undefined) ? '' : String(val);
+
+                if (strVal && strVal !== '/' && strVal.trim() !== '') {
+                    html += `
+                        <div class="info-item">
+                            <span class="info-label">${field}</span>
+                            <span class="info-value">${strVal}</span>
+                        </div>`;
+                    hasContent = true;
+                }
+            });
+            html += '</div>';
+            return hasContent ? html : '';
+        }
+
+        /**
+         * 修改后的主渲染函数：generateConsistBox
+         */
+        function generateConsistBox(consistData, trainNo, apiEmuNo, displayDate, index) {
+            const consistRecord = consistData.record;
+            const containerId = `consist-${index}`;
+            
+            // 修改点 1: 优先显示API返回的规范化“车组号” (例如 CR400AF-2224)，如果不存在则回退到原始 key
+            const displayEmuNo = consistRecord['车组号'] || consistData.raw_key || apiEmuNo;
+
+            // 生成各部分 HTML
+            const techInfoHtml = generateTechInfoHtml(consistRecord);
+            const tableHtml = generateSingleTableContent(consistRecord);
+            const capacityInfoHtml = generateCapacityInfoHtml(consistRecord);
+
+            return `
+                <div class="consist-detail-box" id="${containerId}">
+                    <h4>
+                        车次 ${trainNo} | 日期 ${displayDate} | 
+                        动车组 <strong class="emu-no-clickable" onclick="queryEmuHistory('${apiEmuNo}', '${containerId}')">${displayEmuNo}</strong>
+                    </h4>
+                    
+                    <p class="consist-info">配属：${generateConsistInfo(consistRecord)}</p>
+                    
+                    ${techInfoHtml}
+                    
+                    ${tableHtml}
+                    
+                    ${capacityInfoHtml}
+
+                    <div id="emu-history-${containerId}" style="margin-top: 10px;"></div> 
+                    <a href="#top" style="display: block; text-align: right; margin-top: 10px; color: #1a73e8;">↑ 返回顶部</a>
+                </div>`;
+        }
+
+        function generateErrorBox(trainNo, apiEmuNo, displayDate, index) {
+            return `<div class="consist-detail-box" id="consist-${index}" style="border-color: #e74c3c; background-color: #fbecec;">
+                    <h4>车次 ${trainNo} | 日期 ${displayDate} | 动车组 ${apiEmuNo}</h4>
+                    <p style="color: red;">❌ 编组数据缺失！数据库中未找到车组号 **${apiEmuNo}** 的记录。</p>
+                    <a href="#top" style="display: block; text-align: right; margin-top: 10px; color: #1a73e8;">↑ 返回顶部</a>
+                </div>`;
+        }
+
+        async function queryEmuHistory(emuNoKey, containerId) {
+            const resultDiv = document.getElementById(`emu-history-${containerId}`);
+            if (!resultDiv) return;
+            if (resultDiv.innerHTML !== '') { resultDiv.innerHTML = ''; return; }
+
+            resultDiv.innerHTML = `<p style="text-align: center; color: #555;">正在查询 ${emuNoKey} 近期担当情况...</p>`;
+
+            // 这里使用 rawKey 因为历史 API 应该能识别（假设格式一致）
+            // 如果历史 API 需要特殊处理，可以在此添加 cleanEmuKey
+            const apiUrl = `${API_BASE_URL_HISTORY}${emuNoKey}`;
+
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) throw new Error(`Status ${response.status}`);
+                const historyData = await response.json();
+
+                let content = `<span class="close-history-btn" onclick="document.getElementById('emu-history-${containerId}').innerHTML=''">X</span>`;
+                
+                if (historyData.length === 0) {
+                    content += `<p style="color: #6c757d; text-align: center;">无近期担当记录。</p>`;
+                } else {
+                    const groupedByDate = {};
+                    historyData.forEach(record => {
+                        const dateKey = record.date ? record.date.substring(0, 10) : '未知';
+                        if (!groupedByDate[dateKey]) groupedByDate[dateKey] = [];
+                        groupedByDate[dateKey].push(record);
+                    });
+
+                    const finalDisplayList = [];
+                    const recordsPromises = [];
+
+                    // 预处理所有记录以获取起讫站
+                    const sortedDates = Object.keys(groupedByDate).sort().reverse();
+                    
+                    for (const dateKey of sortedDates) {
+                        const records = groupedByDate[dateKey].sort((a, b) => new Date(a.date) - new Date(b.date));
+                        const endpointsPromises = records.map(r => fetchTrainEndpoints(r.train_no, r.date));
+                        
+                        recordsPromises.push(Promise.all(endpointsPromises).then(endpointsResults => {
+                            let trainsHtml = '';
+                            if (endpointsResults.length > 0) {
+                                let lastEnd = endpointsResults[0].start.trim();
+                                trainsHtml += lastEnd;
+                                records.forEach((r, idx) => {
+                                    const ep = endpointsResults[idx];
+                                    const link = `<span class="history-train-link" onclick="queryTrainData('${r.train_no}', TODAY_DATE_STR, true)">${r.train_no}</span>`;
+                                    if (lastEnd !== ep.start.trim()) trainsHtml += ` <span class="missing-link">(~缺失~)</span> ${ep.start.trim()}`;
+                                    trainsHtml += ` ~ ${link} ~ ${ep.end.trim()}`;
+                                    if (ep.start.trim() === ep.end.trim() && idx < records.length - 1) trainsHtml += ` <span class="missing-link">(~缺失~)</span> `;
+                                    lastEnd = ep.end.trim();
+                                });
+                            } else { trainsHtml = '无法获取起讫站'; }
+                            return { date: dateKey, html: trainsHtml };
+                        }));
+                    }
+                    
+                    const listItems = await Promise.all(recordsPromises);
+                    content += `<table class="history-table"><thead><tr><th style="width: 20%;">日期</th><th>交路</th></tr></thead><tbody>`;
+                    listItems.forEach(item => { content += `<tr><td>${item.date}</td><td>${item.html}</td></tr>`; });
+                    content += `</tbody></table>`;
+                }
+                resultDiv.innerHTML = content;
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="close-history-btn" onclick="document.getElementById('emu-history-${containerId}').innerHTML=''\">X</span><p style="color: red; text-align: center;">查询失败: ${error.message}</p>`;
+            }
+        }
+
+        window.onload = () => {
+            const today = new Date();
+            TODAY_DATE_STR = formatDateToYYYYMMDD(today);
+            // 页面加载显示登录框
+            document.getElementById('loginModal').style.display = 'flex';
+        };
+    </script>
+</body>
+</html>
