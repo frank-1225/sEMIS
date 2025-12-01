@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>动车组信息管理后台</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <link href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css" rel="stylesheet">
+  <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; background-color: #f8fafc; }
+    .modal { background-color: rgba(0,0,0,0.5); }
+    table.dataTable tbody td { vertical-align: middle; }
+    /* 编辑表单样式：限制高度并允许滚动 */
+    .edit-form-container { max-height: 70vh; overflow-y: auto; padding-right: 10px; }
+    .form-group label { display: block; font-weight: 600; font-size: 0.875rem; color: #4b5563; margin-bottom: 0.25rem; }
+    .form-group input { width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; }
+  </style>
+</head>
+<body class="p-6">
+
+  <div id="loginModal" class="fixed inset-0 flex items-center justify-center z-50 modal">
+    <div class="bg-white p-8 rounded-xl shadow-2xl w-96">
+      <h2 class="text-2xl font-bold mb-6 text-center text-blue-600">管理员登录</h2>
+      <input type="password" id="password" placeholder="请输入管理员密码" 
+             class="w-full p-3 border border-gray-300 rounded mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+             onkeydown="if(event.keyCode==13) performLogin()">
+      <button onclick="performLogin()" class="w-full bg-blue-600 text-white p-3 rounded font-bold hover:bg-blue-700 transition">登录</button>
+      <p id="loginMsg" class="text-red-500 text-sm mt-3 text-center"></p>
+    </div>
+  </div>
+
+  <div id="app" class="hidden max-w-[95%] mx-auto bg-white rounded-xl shadow-lg min-h-screen flex flex-col">
+    <header class="bg-slate-800 text-white p-4 rounded-t-xl flex justify-between items-center">
+      <h1 class="text-xl font-bold"><i class="fas fa-database mr-2"></i>动车组数据管理后台</h1>
+      <div class="space-x-4">
+        <button onclick="showImportModal()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-semibold">
+          <i class="fas fa-file-upload mr-1"></i> 批量导入
+        </button>
+        <button onclick="showAddModal()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold">
+          <i class="fas fa-plus mr-1"></i> 新增车辆
+        </button>
+        <button onclick="logout()" class="bg-red-500 hover:bg-red-600 px-4 py-2 rounded text-sm">退出</button>
+      </div>
+    </header>
+
+    <div class="p-4 flex-1 overflow-auto">
+      <table id="manageTable" class="display stripe hover row-border" style="width:100%">
+        <thead>
+          <tr>
+            <th>操作</th>
+            <th>总序号</th> <th>车组号</th>
+            <th>运用属性</th>
+            <th>制造厂</th>
+            <th>配属局</th>
+            <th>配属段</th>
+            <th>配属所</th>
+            <th>备注</th>
+            <th>座椅类型</th>
+          </tr>
+        </thead>
+      </table>
+    </div>
+  </div>
+
+  <div id="editModal" class="hidden fixed inset-0 z-40 overflow-y-auto" role="dialog" aria-modal="true">
+    <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+      <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onclick="closeEditModal()"></div>
+      <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+      <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full">
+        <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+          <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4" id="modalTitle">编辑车辆信息</h3>
+          <div class="edit-form-container">
+            <form id="editForm" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              </form>
+          </div>
+        </div>
+        <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+          <button type="button" onclick="saveData()" id="btnSave" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 sm:ml-3 sm:w-auto sm:text-sm">保存</button>
+          <button type="button" onclick="closeEditModal()" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">取消</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="importModal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal">
+    <div class="bg-white p-6 rounded-lg shadow-xl w-96">
+      <h3 class="text-lg font-bold mb-4">批量导入 CSV</h3>
+      <p class="text-sm text-gray-500 mb-4">注意：这将<span class="text-red-600 font-bold">完全覆盖</span>现有数据库。</p>
+      <input type="file" id="csvFile" accept=".csv" class="mb-4 w-full p-2 border border-gray-300 rounded">
+      <div class="flex justify-end space-x-2">
+        <button onclick="$('#importModal').addClass('hidden')" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">取消</button>
+        <button onclick="uploadCsv()" id="btnUpload" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">确认覆盖导入</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "https://frank1225.dynv6.net:5125"; 
+    let AUTH_KEY = localStorage.getItem('manage_auth_key');
+    let dataTable;
+    let currentEditId = null;
+
+    // 1. 完整的字段列表 (包含所有可编辑字段)
+    const ALL_FIELDS = [
+      "总序号", "车组号", "车内布局", "运用状态", "运用属性", "配属局", "配属段", "配属所",
+      "车型", "批次", "制造厂", "制造日期", "最高运营速度（km/h）", "设计寿命（年）", "列车总长（m）",
+      "车体最大宽度（mm）", "车体最大高度（mm）", "轮周牵引总功率（kW）", "停放制动能力", "编组方式",
+      "双弓间距（m）", "受电弓位置（车厢）", "编组（辆）", "EMIS定员", "席位总数", "客票定员",
+      "商务座-包间式", "商务座-鱼骨式", "商务座-标准型", "特等座", "优选一等座", "一等座", "二等座",
+      "高级动卧", "动卧", "多功能座", "餐座", "无座", "非对号定员-餐座", "非对号定员-边座",
+      "非对号定员-其他", "非对号定员-无座",
+      "01车车种", "01车定员", "02车车种", "02车定员", "03车车种", "03车定员",
+      "04车车种", "04车定员", "05车车种", "05车定员", "06车车种", "06车定员",
+      "07车车种", "07车定员", "08车车种", "08车定员", "09车车种", "09车定员",
+      "10车车种", "10车定员", "11车车种", "11车定员", "12车车种", "12车定员",
+      "13车车种", "13车定员", "14车车种", "14车定员", "15车车种", "15车定员",
+      "16车车种", "16车定员", "17车车种", "17车定员",
+      "市域车所属线路", "特殊涂装", "备注", "座椅类型", "查询用车组号"
+    ];
+
+    $(document).ready(() => {
+      if(AUTH_KEY) checkAuth();
+      else $('#loginModal').removeClass('hidden');
+    });
+
+    async function performLogin() {
+      const pwd = $('#password').val();
+      try {
+        const res = await fetch(`${API_BASE}/api/login`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ password: pwd })
+        });
+        const data = await res.json();
+        if(res.ok) {
+          AUTH_KEY = data.auth_key;
+          localStorage.setItem('manage_auth_key', AUTH_KEY);
+          $('#loginModal').addClass('hidden');
+          initManagePage();
+        } else {
+          $('#loginMsg').text(data.message);
+        }
+      } catch(e) { $('#loginMsg').text('连接失败'); }
+    }
+
+    function checkAuth() {
+      $('#loginModal').addClass('hidden');
+      initManagePage();
+    }
+
+    function initManagePage() {
+      $('#app').removeClass('hidden');
+      setTimeout(() => { loadTable(); }, 50);
+      buildEditForm();
+    }
+
+    function logout() {
+      localStorage.removeItem('manage_auth_key');
+      location.reload();
+    }
+
+    // --- 表格逻辑 ---
+    function loadTable() {
+      if ($.fn.DataTable.isDataTable('#manageTable')) {
+        $('#manageTable').DataTable().ajax.reload();
+        return;
+      }
+
+      dataTable = $('#manageTable').DataTable({
+        processing: true,
+        serverSide: true,
+        scrollX: true,
+        ajax: {
+          url: `${API_BASE}/api/serverside/traindata`,
+          type: 'POST',
+          contentType: 'application/json',
+          headers: { 'X-Auth-Key': AUTH_KEY },
+          data: d => JSON.stringify(d)
+        },
+        columns: [
+          { 
+            data: null, 
+            orderable: false,
+            defaultContent: "", 
+            width: "80px",
+            render: function(data, type, row) {
+              const safeId = String(row['总序号']).replace(/'/g, "\\'");
+              return `
+                <button onclick="openEdit('${safeId}')" class="text-blue-600 hover:text-blue-900 mr-3" title="编辑"><i class="fas fa-edit"></i></button>
+                <button onclick="deleteRow('${safeId}')" class="text-red-600 hover:text-red-900" title="删除"><i class="fas fa-trash"></i></button>
+              `;
+            }
+          },
+          { 
+            data: "总序号", 
+            defaultContent: "", 
+            visible: false // --- 核心修改：隐藏此列 ---
+          },
+          { data: "车组号", defaultContent: "" },
+          { data: "运用属性", defaultContent: "" },
+          { data: "制造厂", defaultContent: "" },
+          { data: "配属局", defaultContent: "" },
+          { data: "配属段", defaultContent: "" },
+          { data: "配属所", defaultContent: "" },
+          { data: "备注", defaultContent: "" },
+          { data: "座椅类型", defaultContent: "" }
+        ],
+        // 依然按照“总序号”（索引1）进行默认排序
+        order: [[1, 'asc']]
+      });
+    }
+
+    // --- 编辑表单构建 (去jQuery化) ---
+    function buildEditForm() {
+      const form = $('#editForm');
+      form.empty();
+      ALL_FIELDS.forEach(field => {
+        const isReadOnly = field === '总序号' ? 'readonly class="bg-gray-100 cursor-not-allowed"' : '';
+        form.append(`
+          <div class="form-group">
+            <label>${field}</label>
+            <input type="text" id="input_${field}" ${isReadOnly}>
+          </div>
+        `);
+      });
+    }
+
+    // 打开编辑
+    window.openEdit = async function(id) {
+      currentEditId = id;
+      $('#modalTitle').text('编辑车辆信息');
+      
+      const rowData = dataTable.rows().data().toArray().find(r => String(r['总序号']) === String(id));
+      
+      if(rowData) {
+        ALL_FIELDS.forEach(field => {
+          const inputEl = document.getElementById(`input_${field}`);
+          if(inputEl) inputEl.value = rowData[field] || '';
+        });
+        $('#editModal').removeClass('hidden');
+      } else {
+        alert('无法加载行数据，请刷新后重试');
+      }
+    };
+
+    // 打开新增
+    window.showAddModal = function() {
+      currentEditId = null;
+      $('#modalTitle').text('新增车辆信息');
+      
+      ALL_FIELDS.forEach(field => {
+        const inputEl = document.getElementById(`input_${field}`);
+        if(inputEl) inputEl.value = '';
+      });
+
+      const idInput = document.getElementById('input_总序号');
+      if(idInput) {
+          idInput.value = '自动生成';
+      }
+      $('#editModal').removeClass('hidden');
+    }
+
+    window.closeEditModal = function() {
+      $('#editModal').addClass('hidden');
+    }
+
+    // 保存数据
+    window.saveData = async function() {
+      const formData = {};
+      ALL_FIELDS.forEach(field => {
+        if(field !== '总序号') {
+            const inputEl = document.getElementById(`input_${field}`);
+            if (inputEl) formData[field] = inputEl.value;
+        }
+      });
+
+      const url = currentEditId ? `${API_BASE}/api/manage/update` : `${API_BASE}/api/manage/add`;
+      const payload = currentEditId ? { id: currentEditId, data: formData } : { data: formData };
+
+      const btn = document.getElementById('btnSave');
+      const originalText = btn.innerText;
+      btn.innerText = '保存中...';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Auth-Key': AUTH_KEY },
+          body: JSON.stringify(payload)
+        });
+        
+        if(res.ok) {
+          alert('保存成功！');
+          closeEditModal();
+          dataTable.ajax.reload(null, false);
+        } else {
+          alert('保存失败: ' + (await res.json()).message);
+        }
+      } catch(e) {
+        console.error(e);
+        alert('请求错误');
+      } finally {
+        btn.innerText = originalText;
+        btn.disabled = false;
+      }
+    }
+
+    // 删除
+    window.deleteRow = async function(id) {
+      if(!confirm(`确定要删除总序号为 ${id} 的记录吗？`)) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/manage/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Auth-Key': AUTH_KEY },
+          body: JSON.stringify({ id: id })
+        });
+        if(res.ok) {
+          alert('删除成功');
+          dataTable.ajax.reload(null, false);
+        } else {
+          alert('删除失败');
+        }
+      } catch(e) { alert('网络错误'); }
+    }
+
+    // 导入
+    window.showImportModal = function() { $('#importModal').removeClass('hidden'); }
+
+    window.uploadCsv = async function() {
+      const fileInput = document.getElementById('csvFile');
+      if (!fileInput.files[0]) return alert('请选择文件');
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      
+      const btn = document.getElementById('btnUpload');
+      btn.innerText = '上传中...'; btn.disabled = true;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/upload_data`, {
+            method: 'POST', headers: { 'X-Auth-Key': AUTH_KEY }, body: formData
+        });
+        if(res.ok) {
+          alert('导入成功'); $('#importModal').addClass('hidden'); dataTable.ajax.reload();
+        } else {
+          alert('导入失败: ' + (await res.json()).message);
+        }
+      } catch(e) { alert('网络错误'); } 
+      finally { btn.innerText = '确认覆盖导入'; btn.disabled = false; }
+    }
+  </script>
+</body>
+</html>
