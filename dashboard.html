@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>动车组高级配属看板</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; }
+        .modal { background-color: rgba(0,0,0,0.5); }
+        
+        /* 树状表格样式 */
+        .complex-table { width: 100%; border-collapse: collapse; border: 1px solid #94a3b8; font-size: 0.85rem; background: white; }
+        .complex-table th { background-color: #e2e8f0; color: #1e293b; font-weight: 700; padding: 8px; border: 1px solid #94a3b8; text-align: center; white-space: nowrap; }
+        .complex-table td { padding: 6px 8px; border: 1px solid #94a3b8; text-align: center; color: #334155; vertical-align: middle; }
+        
+        /* 透视表专用样式 */
+        .pivot-table th { font-size: 0.8rem; padding: 6px 4px; min-width: 50px; }
+        .pivot-table td { font-size: 0.85rem; padding: 6px 4px; height: 32px; }
+        .pivot-subtotal-row { background-color: #f1f5f9; font-weight: 700; color: #334155; }
+        .pivot-total-row { background-color: #cbd5e1; font-weight: 800; color: #0f172a; }
+        .cell-data { display: flex; flex-direction: column; line-height: 1.2; align-items: center; }
+        .cell-combined { font-weight: 600; color: #0f172a; }
+        .cell-sub { font-size: 0.75rem; color: #64748b; }
+        
+        /* 小计行样式 */
+        .subtotal-row { background-color: #f8fafc; font-weight: 600; color: #475569; }
+        .subtotal-row-lvl1 { background-color: #f1f5f9; font-weight: 700; color: #334155; } 
+        .subtotal-row-lvl0 { background-color: #e2e8f0; font-weight: 800; color: #1e293b; } 
+
+        /* Select2 & Filters */
+        .select2-container .select2-selection--multiple { min-height: 38px; border-color: #cbd5e1; border-radius: 0.375rem; }
+        .filter-label { font-weight: 600; font-size: 0.875rem; color: #475569; margin-bottom: 4px; }
+        .tag-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+        .tag-group-label { font-size: 0.8rem; font-weight: 700; color: #94a3b8; width: 60px; }
+        .tag-btn {
+            border: 1px solid #cbd5e1; background-color: white; color: #64748b;
+            padding: 3px 10px; rounded: 4px; font-size: 0.85rem; font-weight: 500;
+            cursor: pointer; transition: all 0.2s; user-select: none;
+            display: flex; align-items: center; gap: 5px;
+        }
+        .tag-btn:hover { background-color: #f1f5f9; }
+        .tag-btn.active { background-color: #eff6ff; border-color: #3b82f6; color: #2563eb; font-weight: 600; }
+        
+        /* 加载遮罩 */
+        #loadingMask { background-color: rgba(255,255,255,0.8); z-index: 40; }
+    </style>
+</head>
+<body class="p-4">
+
+    <div id="loginModal" class="fixed inset-0 flex items-center justify-center z-50 modal bg-gray-900 bg-opacity-90">
+        <div class="bg-white p-8 rounded-xl shadow-2xl w-96 transform transition-all scale-100">
+            <h2 class="text-2xl font-bold mb-6 text-center text-blue-700">安全登录</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">访问密码</label>
+                    <input type="password" id="password" placeholder="请输入密钥以解锁数据" 
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+                           onkeydown="if(event.keyCode==13) performLogin()">
+                </div>
+                <button onclick="performLogin()" id="btnLogin" class="w-full bg-blue-600 text-white p-3 rounded-lg font-bold hover:bg-blue-700 transition shadow-lg">
+                    验证并进入
+                </button>
+            </div>
+            <p id="loginMsg" class="text-red-500 text-sm mt-4 text-center font-medium min-h-[20px]"></p>
+        </div>
+    </div>
+
+    <div id="loadingMask" class="hidden fixed inset-0 flex items-center justify-center">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+    </div>
+
+    <div id="app" class="hidden max-w-[1920px] mx-auto space-y-4">
+        <div class="bg-white p-4 rounded-lg shadow border border-slate-200">
+            <div class="flex flex-wrap justify-between items-center gap-4 mb-4 border-b border-slate-100 pb-4">
+                <div class="flex items-center gap-4">
+                    <h1 class="text-lg font-bold text-slate-800"><i class="fas fa-sitemap mr-2 text-blue-600"></i>配属多维看板</h1>
+                    <div class="flex bg-slate-100 rounded p-1 space-x-1">
+                        <button onclick="setMode('bureau')" id="btn-mode-bureau" class="px-4 py-1.5 rounded text-sm font-bold transition-all bg-white shadow text-blue-600">配属明细</button>
+                        <button onclick="setMode('model')" id="btn-mode-model" class="px-4 py-1.5 rounded text-sm font-bold transition-all text-gray-500 hover:text-gray-700">车型明细</button>
+                        <button onclick="setMode('overview')" id="btn-mode-overview" class="px-4 py-1.5 rounded text-sm font-bold transition-all text-gray-500 hover:text-gray-700">全路配属分析</button>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="loadData()" class="px-5 py-2 bg-blue-600 text-white rounded font-semibold hover:bg-blue-700 text-sm shadow"><i class="fas fa-search mr-1"></i> 查询</button>
+                    <button onclick="exportToExcel()" class="px-5 py-2 bg-green-600 text-white rounded font-semibold hover:bg-green-700 text-sm shadow"><i class="fas fa-file-excel mr-1"></i> 导出</button>
+                    <button onclick="logout()" class="px-3 py-2 text-red-500 border border-red-200 rounded hover:bg-red-50 text-sm font-medium">退出</button>
+                </div>
+            </div>
+
+            <div class="mb-4 space-y-2">
+                <div class="tag-group"><div class="tag-group-label">系列</div>
+                    <div class="tag-btn active" onclick="toggleFilter(this, 'series', 'harmony')">和谐号</div>
+                    <div class="tag-btn active" onclick="toggleFilter(this, 'series', 'fuxing')">复兴号</div>
+                </div>
+                <div class="tag-group"><div class="tag-group-label">编组</div>
+                    <div class="tag-btn active" onclick="toggleFilter(this, 'length', 'short')">短编组</div>
+                    <div class="tag-btn active" onclick="toggleFilter(this, 'length', 'long')">长编组</div>
+                </div>
+                <div class="tag-group"><div class="tag-group-label">速度</div>
+                    <div class="tag-btn active" onclick="toggleFilter(this, 'speed', 'v1')">200以下</div>
+                    <div class="tag-btn active" onclick="toggleFilter(this, 'speed', 'v2')">200-250</div>
+                    <div class="tag-btn active" onclick="toggleFilter(this, 'speed', 'v3')">300-350</div>
+                    <div class="tag-btn active" onclick="toggleFilter(this, 'speed', 'v4')">350以上</div>
+                </div>
+                <div class="tag-group"><div class="tag-group-label">特征</div>
+                    <div class="tag-btn" onclick="toggleFilter(this, 'features', 'sleeper')">卧铺</div>
+                    <div class="tag-btn" onclick="toggleFilter(this, 'features', 'highcold')">高寒</div>
+                    <div class="tag-btn" onclick="toggleFilter(this, 'features', 'smart')">智能复兴</div>
+                    <div class="tag-btn" onclick="toggleFilter(this, 'features', 'inspect')">检测列车</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 border-t border-slate-100 pt-4">
+                <div><div class="filter-label">配属局 (多选)</div><select id="selBureau" multiple class="w-full"></select></div>
+                <div><div class="filter-label">配属段 (级联)</div><select id="selDepot" multiple class="w-full" disabled></select></div>
+                <div><div class="filter-label">配属所 (级联)</div><select id="selLocation" multiple class="w-full" disabled></select></div>
+                <div><div class="filter-label">车型 (多选)</div><select id="selModel" multiple class="w-full"></select></div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-white p-4 rounded shadow border-l-4 border-blue-500">
+                <div class="text-gray-500 text-sm font-medium">总车数</div>
+                <div class="text-3xl font-bold text-slate-800" id="statCount">--</div>
+            </div>
+            <div class="bg-white p-4 rounded shadow border-l-4 border-indigo-500">
+                <div class="text-gray-500 text-sm font-medium">折合标准组</div>
+                <div class="text-3xl font-bold text-indigo-600" id="statStd">--</div>
+            </div>
+        </div>
+
+        <div class="bg-white p-1 rounded shadow overflow-x-auto min-h-[600px]">
+            <table class="complex-table" id="analysisTable">
+                <thead id="tableHead"></thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "https://frank1225.dynv6.net:5125"; 
+        let AUTH_KEY = localStorage.getItem('manage_auth_key');
+        
+        let currentMode = 'bureau'; 
+        let fullMapData = [];
+        let allModels = [];   
+        let allCarCounts = []; 
+        let allSpeeds = []; 
+        
+        // --- 核心安全增强：覆盖 fetch 以拦截 401 错误 ---
+        const originalFetch = window.fetch;
+        window.fetch = async (...args) => {
+            const response = await originalFetch(...args);
+            if (response.status === 401) {
+                // 如果遇到未授权，强制登出并停止后续逻辑
+                logout();
+                throw new Error("Unauthorized");
+            }
+            return response;
+        };
+
+        const activeFeatures = {
+            series: new Set(['harmony', 'fuxing']),
+            length: new Set(['short', 'long']),
+            speed: new Set(['v1', 'v2', 'v3', 'v4']),
+            features: new Set()
+        };
+
+        // --- 字典排序定义 ---
+        const ORDER_BUREAU = [
+            "哈尔滨局集团", "沈阳局集团", "北京局集团", "太原局集团", "呼和浩特局集团", 
+            "郑州局集团", "武汉局集团", "西安局集团", "济南局集团", "上海局集团", 
+            "南昌局集团", "广州局集团", "南宁局集团", "成都局集团", "昆明局集团", 
+            "兰州局集团", "乌鲁木齐局集团", "青藏集团", "广东城际公司", "铁科院集团公司", 
+            "香港铁路公司", "国铁集团", "已除籍"
+        ];
+
+        const ORDER_DEPOT = [
+            "哈尔滨动车段", "沈阳动车段", "北京动车段", "天津动车客车段", "太原车辆段", 
+            "包头车辆段", "郑州动车段", "武汉动车段", "西安动车段", "青岛动车段", 
+            "上海动车段", "南京动车段", "南昌车辆段", "福州动车段", "广州车辆段", 
+            "广州动车段", "海口机辆轮渡段", "长沙车辆段", "南宁车辆段", "成都动车段", 
+            "重庆车辆段", "贵阳车辆段", "昆明车辆段", "兰州车辆段", "乌鲁木齐车辆段", 
+            "西宁车辆段", "直属", "已除籍"
+        ];
+
+        const ORDER_LOCATION = [
+            "哈尔滨西动车所", "沈阳北动车所", "长春动车所", "大连动车所", "沈阳南动车所", 
+            "赤峰动车所", "北京动车所", "北京西动车所", "北京南动车所", "石家庄动车所", 
+            "北京北动车所", "雄安动车所", "北京朝阳动车所", "天津动车所", "大厂动车所", 
+            "太原动车所", "大同南动车所", "呼和浩特东动车所", "郑州东动车所", "郑州南动车所", 
+            "郑州东动车所二所", "汉口动车所", "武汉动车所", "襄阳动车所", "宜昌动车所", 
+            "西安北郑西动车所", "西安北西成动车所", "西安北银西动车所", "青岛动车所", "济南动车所", 
+            "青岛北动车所", "济南东动车所", "临沂北动车所", "上海南动车所", "南翔动车所", 
+            "虹桥动车所", "杭州动车所", "杭州西动车所", "宁波动车所", "南京动车所", 
+            "南京南动车所", "合肥南动车所", "徐州东动车所", "南通动车所", "南昌西动车一所", 
+            "南昌西动车二所", "南昌东动车所", "福州南动车一所", "龙岩动车所", "厦门北动车所", 
+            "福州南动车二所", "广州东动车所", "广州南动车所", "广珠动车所", "深圳动车所", 
+            "佛山西客专动车所", "潮州动车所", "新塘动车所", "湛江北动车所", "三亚动车所", 
+            "海口城际动车所", "长沙动车所", "长沙城际动车所", "长沙西动车所", "南宁动车所", 
+            "桂林动车所", "成都东动车所", "天府动车所", "重庆北动车所", "重庆西动车所", 
+            "贵阳北动车所", "昆明南动车所", "兰州西动车所", "银川动车所", "乌鲁木齐动车所", 
+            "西宁动车所", "龙塘动车所", "佛山西城际动车所", "惠州北动车所", "检测列车", 
+            "石岗动车所", "专运中心", "已除籍"
+        ];
+
+        const SPEED_BUCKETS = [
+            { id: 'v1', label: '200以下',  check: v => v < 200 },
+            { id: 'v2', label: '200-250', check: v => v >= 200 && v <= 250 },
+            { id: 'v3', label: '300-350', check: v => v >= 300 && v <= 350 },
+            { id: 'v4', label: '350以上',  check: v => v > 350 },
+            { id: 'other', label: '其他',  check: v => false }
+        ];
+
+        $(document).ready(() => {
+            // 安全逻辑：页面加载后，如果本地有key，先验证；如果没有，保持登录框
+            if(AUTH_KEY) {
+                verifySession();
+            } else {
+                $('#loginModal').removeClass('hidden');
+                $('#app').addClass('hidden');
+            }
+        });
+
+        function customSort(arr, orderList) {
+            return arr.sort((a, b) => {
+                const idxA = orderList.indexOf(a);
+                const idxB = orderList.indexOf(b);
+                if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                if (idxA !== -1) return -1;
+                if (idxB !== -1) return 1;
+                return a.localeCompare(b, 'zh');
+            });
+        }
+
+        // --- 核心认证逻辑 ---
+        async function verifySession() {
+            // 尝试加载基础数据作为验证
+            try {
+                // 如果 fetch 拦截到 401，会自动调用 logout
+                await loadBaseData();
+                // 如果到了这一步，说明验证通过
+                $('#loginModal').addClass('hidden');
+                $('#app').removeClass('hidden');
+                initUI();
+                loadData();
+            } catch(e) {
+                // 验证失败，确保登出
+                logout();
+            }
+        }
+
+        async function performLogin() {
+            const pwd = $('#password').val();
+            if(!pwd) return;
+            
+            $('#btnLogin').text('验证中...').prop('disabled', true);
+            
+            try {
+                const res = await originalFetch(`${API_BASE}/api/login`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ password: pwd })
+                });
+                
+                const data = await res.json();
+                
+                if(res.ok) {
+                    AUTH_KEY = data.auth_key;
+                    localStorage.setItem('manage_auth_key', AUTH_KEY);
+                    $('#loginModal').addClass('hidden');
+                    $('#app').removeClass('hidden');
+                    // 登录成功后，才初始化数据
+                    verifySession();
+                } else {
+                    $('#loginMsg').text(data.message);
+                }
+            } catch(e) {
+                $('#loginMsg').text('连接服务器失败');
+            } finally {
+                $('#btnLogin').text('验证并进入').prop('disabled', false);
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('manage_auth_key');
+            AUTH_KEY = null;
+            $('#app').addClass('hidden');
+            $('#loginModal').removeClass('hidden');
+            $('#password').val('');
+            $('#loginMsg').text('');
+        }
+
+        function initUI() {
+            $('#selBureau, #selDepot, #selLocation, #selModel').select2({ placeholder: "点击选择...", allowClear: true, width: '100%' });
+            $('#selBureau').off('change').on('change', updateDepotOptions);
+            $('#selDepot').off('change').on('change', updateLocationOptions);
+        }
+
+        async function loadBaseData() {
+            // 这里使用带 key 的请求。如果 key 无效，全局 fetch 会拦截 401
+            const res = await fetch(`${API_BASE}/api/traindata`, { method: 'POST', headers: { 'X-Auth-Key': AUTH_KEY } });
+            const data = await res.json();
+            fullMapData = data.map_data || [];
+            
+            let bureaus = [...new Set(fullMapData.map(i => i['配属局']).filter(x => x))];
+            customSort(bureaus, ORDER_BUREAU);
+            populateSelect('#selBureau', bureaus);
+
+            allModels = data.filters?.models || [];
+            allCarCounts = data.filters?.car_counts || [];
+            allSpeeds = data.filters?.speeds || [];
+            allModels.sort((a,b) => a.localeCompare(b, 'zh'));
+            populateSelect('#selModel', allModels);
+        }
+
+        function populateSelect(sel, items) {
+            const $s = $(sel); $s.empty();
+            items.forEach(i => $s.append(new Option(i, i, false, false)));
+            $s.trigger('change.select2');
+        }
+
+        function updateDepotOptions() { 
+            const bureaus = $('#selBureau').val() || [];
+            const $depot = $('#selDepot').empty().prop('disabled', true);
+            const $loc = $('#selLocation').empty().prop('disabled', true);
+            let valid = bureaus.length === 0 ? fullMapData : fullMapData.filter(i => bureaus.includes(i['配属局']));
+            let depots = [...new Set(valid.map(i => i['配属段']).filter(x=>x))];
+            customSort(depots, ORDER_DEPOT);
+            depots.forEach(d => $depot.append(new Option(d, d)));
+            $depot.prop('disabled', false).trigger('change');
+        }
+
+        function updateLocationOptions() {
+            const b = $('#selBureau').val() || [], d = $('#selDepot').val() || [];
+            const $loc = $('#selLocation').empty().prop('disabled', true);
+            if (!b.length && !d.length) return;
+            let f = fullMapData;
+            if (b.length) f = f.filter(i => b.includes(i['配属局']));
+            if (d.length) f = f.filter(i => d.includes(i['配属段']));
+            let locs = [...new Set(f.map(i => i['配属所']).filter(x=>x))];
+            customSort(locs, ORDER_LOCATION);
+            locs.forEach(l => $loc.append(new Option(l, l)));
+            $loc.prop('disabled', false).trigger('change');
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            const btnClassActive = 'px-4 py-1.5 rounded text-sm font-bold transition-all bg-white shadow text-blue-600 border border-blue-100';
+            const btnClassInactive = 'px-4 py-1.5 rounded text-sm font-bold transition-all text-gray-500 hover:text-gray-700 border border-transparent';
+            $('#btn-mode-bureau').attr('class', mode === 'bureau' ? btnClassActive : btnClassInactive);
+            $('#btn-mode-model').attr('class', mode === 'model' ? btnClassActive : btnClassInactive);
+            $('#btn-mode-overview').attr('class', mode === 'overview' ? btnClassActive : btnClassInactive);
+            
+            const $tbl = $('#analysisTable');
+            if(mode === 'overview') $tbl.addClass('pivot-table'); else $tbl.removeClass('pivot-table');
+            
+            loadData();
+        }
+
+        window.toggleFilter = function(el, cat, val) {
+            const set = activeFeatures[cat];
+            if (set.has(val)) { set.delete(val); $(el).removeClass('active'); } 
+            else { set.add(val); $(el).addClass('active'); }
+            loadData();
+        }
+
+        function getComputedFilters() {
+            const userSelectedModels = $('#selModel').val() || [];
+            let validModels = allModels.filter(m => {
+                const u = m.toUpperCase();
+                let s = false;
+                if (!activeFeatures.series.size) s = false;
+                else {
+                    if (activeFeatures.series.has('harmony') && (u.startsWith('CRH') || u === 'CJ6')) s = true;
+                    if (activeFeatures.series.has('fuxing') && u.startsWith('CR') && !u.startsWith('CRH')) s = true;
+                }
+                let f = true;
+                if (activeFeatures.features.has('sleeper') && !u.includes('E')) f = false;
+                if (activeFeatures.features.has('highcold') && !u.includes('G')) f = false;
+                if (activeFeatures.features.has('smart') && !(u.includes('S') || u.includes('Z'))) f = false;
+                if (activeFeatures.features.has('inspect') && !(u.includes('J') && u !== 'CJ6')) f = false;
+                return s && f;
+            });
+            let validCarCounts = allCarCounts.filter(c => {
+                const n = parseFloat(String(c).replace('辆','')); if (isNaN(n)) return false;
+                if (activeFeatures.length.has('short') && n <= 8) return true;
+                if (activeFeatures.length.has('long') && n > 8) return true;
+                return false;
+            });
+            if (!activeFeatures.length.size) validCarCounts = ['__NO_MATCH__'];
+            
+            let validSpeeds = allSpeeds.filter(s => {
+                const n = parseFloat(String(s).replace('km/h','')); if (isNaN(n)) return false;
+                if (activeFeatures.speed.has('v1') && n < 200) return true;
+                if (activeFeatures.speed.has('v2') && n >= 200 && n <= 250) return true;
+                if (activeFeatures.speed.has('v3') && n >= 300 && n <= 350) return true;
+                if (activeFeatures.speed.has('v4') && n > 350) return true;
+                return false;
+            });
+            if (!activeFeatures.speed.size) validSpeeds = ['__NO_MATCH__'];
+
+            if (userSelectedModels.length > 0) validModels = validModels.filter(m => userSelectedModels.includes(m));
+            if (!validModels.length) validModels = ['__NO_MATCH__'];
+
+            return { models: validModels, carCounts: validCarCounts, speeds: validSpeeds };
+        }
+
+        async function loadData() {
+            // 安全检查：如果没有 key，不发请求，直接弹窗
+            if (!AUTH_KEY) { logout(); return; }
+
+            const computed = getComputedFilters();
+            const filters = {
+                '配属局': $('#selBureau').val(), '配属段': $('#selDepot').val(), '配属所': $('#selLocation').val(),
+                '车型': computed.models, '编组（辆）': computed.carCounts, '最高运营速度（km/h）': computed.speeds
+            };
+
+            let group_by_fields = [];
+            if (currentMode === 'bureau') {
+                group_by_fields = ['配属局', '配属段', '配属所', '车型'];
+            } else if (currentMode === 'model') {
+                group_by_fields = ['车型', '配属局', '配属段', '配属所'];
+            } else if (currentMode === 'overview') {
+                group_by_fields = ['最高运营速度（km/h）', '车型', '配属局'];
+            }
+
+            // 显示遮罩
+            $('#loadingMask').removeClass('hidden');
+
+            try {
+                const res = await fetch(`${API_BASE}/api/dashboard/stats`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Auth-Key': AUTH_KEY },
+                    body: JSON.stringify({ group_by: group_by_fields, filters: filters })
+                });
+                
+                const data = await res.json();
+                
+                $('#statCount').text(data.total_trains);
+                $('#statStd').text(parseFloat(data.total_standard_sets.toFixed(3)));
+                
+                if (currentMode === 'bureau' || currentMode === 'model') {
+                    renderTreeTable(data.stats, group_by_fields, filters);
+                } else if (currentMode === 'overview') {
+                    renderOverviewTable(data.stats);
+                }
+
+            } catch(e) { 
+                console.error(e);
+                // 网络错误也可能提示，但 401 已经被 fetch 拦截处理了
+            } finally {
+                $('#loadingMask').addClass('hidden');
+            }
+        }
+
+        function renderTreeTable(flatData, levels, activeFilters) {
+             const thead = $('#tableHead');
+             const tbody = $('#tableBody');
+             let headHtml = '<tr>'; levels.forEach(l => headHtml += `<th>${l}</th>`); 
+             headHtml += '<th width="100">数量</th><th width="120">标准组</th></tr>';
+             thead.html(headHtml);
+             if(!flatData.length) { tbody.html('<tr><td colspan="10" class="py-8 text-gray-400 text-center">无数据</td></tr>'); return; }
+             
+             const tree = {};
+             flatData.forEach(row => {
+                let current = tree;
+                levels.forEach((field, idx) => {
+                    const val = row[field] || '未知';
+                    if (!current[val]) {
+                        if (idx === levels.length - 1) current[val] = { __data: row }; 
+                        else current[val] = {};
+                    }
+                    current = current[val];
+                });
+             });
+
+             function shouldShowSubtotal(levelName) {
+                if (currentMode === 'model') return (levelName === '车型');
+                if (levelName === '配属局') return (!activeFilters['配属段']?.length && !activeFilters['配属所']?.length);
+                if (levelName === '配属段') return (!activeFilters['配属所']?.length);
+                if (levelName === '配属所') return true; 
+                return true; 
+             }
+
+             function traverse(node, depth) {
+                let keys = Object.keys(node);
+                const currentLevelName = levels[depth];
+                
+                // 应用排序
+                if (currentLevelName === '配属局') customSort(keys, ORDER_BUREAU);
+                else if (currentLevelName === '配属段') customSort(keys, ORDER_DEPOT);
+                else if (currentLevelName === '配属所') customSort(keys, ORDER_LOCATION);
+                else keys.sort((a,b) => a.localeCompare(b, 'zh'));
+
+                let html = '';
+                let totalRowSpan = 0;
+                let sumCount = 0;
+                let sumStd = 0;
+
+                keys.forEach(key => {
+                    const child = node[key];
+                    if (child.__data) {
+                        const d = child.__data;
+                        const stdDisplay = parseFloat(d.standard_sets.toFixed(3));
+                        html += `<tr><td>${key}</td><td>${d.count}</td><td>${stdDisplay}</td></tr>`;
+                        totalRowSpan += 1;
+                        sumCount += d.count;
+                        sumStd += d.standard_sets;
+                    } else {
+                        const res = traverse(child, depth + 1);
+                        const showSubtotal = shouldShowSubtotal(currentLevelName);
+                        const currentRowSpan = res.rowSpan + (showSubtotal ? 1 : 0);
+                        
+                        const firstTrIdx = res.html.indexOf('<tr>');
+                        const insertIdx = firstTrIdx + 4;
+                        const td = `<td rowspan="${currentRowSpan}" style="background-color: #fff; font-weight: 600;">${key}</td>`;
+                        let nodeHtml = res.html.slice(0, insertIdx) + td + res.html.slice(insertIdx);
+                        
+                        if (showSubtotal) {
+                            let subLabel = '小计';
+                            let rowClass = 'subtotal-row';
+                            if (depth === 0) { subLabel = '汇总'; rowClass = 'subtotal-row-lvl0'; }
+                            else if (depth === 1 && currentMode === 'bureau') { subLabel = '段小计'; rowClass = 'subtotal-row-lvl1'; }
+                            else { subLabel = '小计'; }
+
+                            const colspan = levels.length - 1 - depth;
+                            const stdTotalDisplay = parseFloat(res.sumStd.toFixed(3));
+                            nodeHtml += `<tr class="${rowClass}"><td colspan="${colspan}">${subLabel}</td><td>${res.sumCount}</td><td>${stdTotalDisplay}</td></tr>`;
+                        }
+                        html += nodeHtml;
+                        totalRowSpan += currentRowSpan;
+                        sumCount += res.sumCount;
+                        sumStd += res.sumStd;
+                    }
+                });
+                return { html, rowSpan: totalRowSpan, sumCount, sumStd };
+             }
+             tbody.html(traverse(tree, 0).html);
+        }
+
+        // --- 渲染：全路配属分析 ---
+        function renderOverviewTable(flatData) {
+            const thead = $('#tableHead');
+            const tbody = $('#tableBody');
+            
+            const dataMatrix = {};
+            const allFoundBureaus = new Set();
+            const modelsInSpeed = {};
+
+            SPEED_BUCKETS.forEach(c => { 
+                dataMatrix[c.id] = {}; 
+                modelsInSpeed[c.id] = new Set();
+            });
+
+            flatData.forEach(row => {
+                const speedVal = parseFloat(String(row['最高运营速度（km/h）']).replace('km/h',''));
+                let sId = 'other';
+                for (const bucket of SPEED_BUCKETS) {
+                    if (bucket.check(speedVal)) { sId = bucket.id; break; }
+                }
+                const bureauFull = row['配属局'] || '未知';
+                const model = row['车型'] || '未知';
+                allFoundBureaus.add(bureauFull);
+                
+                if (!dataMatrix[sId][model]) dataMatrix[sId][model] = {};
+                if (!dataMatrix[sId][model][bureauFull]) dataMatrix[sId][model][bureauFull] = { count: 0, std: 0 };
+                
+                dataMatrix[sId][model][bureauFull].count += row.count;
+                dataMatrix[sId][model][bureauFull].std += row.standard_sets;
+                
+                modelsInSpeed[sId].add(model);
+            });
+
+            // 列头排序：应用 ORDER_BUREAU
+            const sortedBureaus = Array.from(allFoundBureaus);
+            customSort(sortedBureaus, ORDER_BUREAU);
+
+            let headHtml = `<tr><th style="width:100px">速度等级</th><th style="width:150px">车型</th>`;
+            sortedBureaus.forEach(b => { headHtml += `<th>${b}</th>`; });
+            headHtml += `<th>总计</th></tr>`;
+            thead.html(headHtml);
+
+            let bodyHtml = '';
+            const grandTotalCol = {}; let grandTotalAll = { count: 0, std: 0 };
+            sortedBureaus.forEach(b => grandTotalCol[b] = { count: 0, std: 0 });
+
+            const targetBuckets = ['v1', 'v2', 'v3', 'v4'];
+            
+            targetBuckets.forEach(sId => {
+                const bucket = SPEED_BUCKETS.find(b => b.id === sId);
+                const models = Array.from(modelsInSpeed[sId]).sort((a,b)=>a.localeCompare(b,'zh'));
+                
+                if (models.length === 0) return;
+
+                let speedTotalCount = 0; let speedTotalStd = 0;
+                const speedColTotal = {};
+                sortedBureaus.forEach(b => speedColTotal[b] = { count: 0, std: 0 });
+
+                models.forEach((model, idx) => {
+                    let rowHtml = '<tr>';
+                    if (idx === 0) {
+                        rowHtml += `<td rowspan="${models.length + 1}" style="background-color: #fff; font-weight: bold; vertical-align: middle;">${bucket.label}</td>`;
+                    }
+                    rowHtml += `<td>${model}</td>`;
+
+                    let rowTotalCount = 0; let rowTotalStd = 0;
+
+                    sortedBureaus.forEach(bureau => {
+                        const cellData = dataMatrix[sId][model][bureau];
+                        if (cellData && cellData.count > 0) {
+                            const stdFixed = parseFloat(cellData.std.toFixed(3));
+                            rowHtml += `<td><div class="cell-data"><span class="cell-combined">${cellData.count} / ${stdFixed}</span></div></td>`;
+                            
+                            rowTotalCount += cellData.count; rowTotalStd += cellData.std;
+                            speedColTotal[bureau].count += cellData.count; speedColTotal[bureau].std += cellData.std;
+                            grandTotalCol[bureau].count += cellData.count; grandTotalCol[bureau].std += cellData.std;
+                        } else {
+                            rowHtml += `<td></td>`;
+                        }
+                    });
+                    
+                    const rowStdFixed = parseFloat(rowTotalStd.toFixed(3));
+                    rowHtml += `<td><div class="cell-data"><span class="cell-combined">${rowTotalCount} / ${rowStdFixed}</span></div></td></tr>`;
+                    bodyHtml += rowHtml;
+                    
+                    speedTotalCount += rowTotalCount; speedTotalStd += rowTotalStd;
+                });
+
+                let subRowHtml = `<tr class="pivot-subtotal-row"><td>小计</td>`;
+                sortedBureaus.forEach(bureau => {
+                    const d = speedColTotal[bureau];
+                    if (d.count > 0) {
+                        subRowHtml += `<td><div class="cell-data"><span class="cell-combined">${d.count} / ${parseFloat(d.std.toFixed(3))}</span></div></td>`;
+                    } else {
+                        subRowHtml += `<td></td>`;
+                    }
+                });
+                subRowHtml += `<td><div class="cell-data"><span class="cell-combined">${speedTotalCount} / ${parseFloat(speedTotalStd.toFixed(3))}</span></div></td></tr>`;
+                bodyHtml += subRowHtml;
+                
+                grandTotalAll.count += speedTotalCount; grandTotalAll.std += speedTotalStd;
+            });
+
+            let totalRowHtml = `<tr class="pivot-total-row"><td colspan="2">总计</td>`;
+            sortedBureaus.forEach(bureau => {
+                const d = grandTotalCol[bureau];
+                if (d.count > 0) {
+                    totalRowHtml += `<td><div class="cell-data"><span class="cell-combined">${d.count} / ${parseFloat(d.std.toFixed(3))}</span></div></td>`;
+                } else {
+                    totalRowHtml += `<td></td>`;
+                }
+            });
+            totalRowHtml += `<td><div class="cell-data"><span class="cell-combined">${grandTotalAll.count} / ${parseFloat(grandTotalAll.std.toFixed(3))}</span></div></td></tr>`;
+            bodyHtml += totalRowHtml;
+
+            tbody.html(bodyHtml);
+        }
+
+        function exportToExcel() {
+            const table = document.getElementById("analysisTable");
+            let sheetName = "配属报表";
+            if (currentMode === 'model') sheetName = "车型明细";
+            if (currentMode === 'overview') sheetName = "全路分析";
+            const wb = XLSX.utils.table_to_book(table, {sheet: sheetName});
+            XLSX.writeFile(wb, `动车组配属报表_${new Date().toISOString().split('T')[0]}.xlsx`);
+        }
+    </script>
+</body>
+</html>
